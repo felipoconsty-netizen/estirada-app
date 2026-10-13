@@ -17,6 +17,7 @@ export interface Wellness {
 }
 
 export interface Injury {
+  id?: string
   date: string
   zone: string
   note: string

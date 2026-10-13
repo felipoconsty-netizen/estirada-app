@@ -30,9 +30,10 @@ export const wellnessScore = (w: Wellness) => (w.energy + w.sleep + w.legs + w.s
 
 const rank = { ok: 0, info: 0, warn: 1, bad: 2 } as const
 
-export function derive(p: Player, lang: Lang): PlayerView {
+export function derive(p: Player, lang: Lang): PlayerView | null {
   const es = lang === 'es'
   const m = p.measures[p.measures.length - 1]
+  if (!m) return null
   const age = ageAt(p.dob, m.date)
   const offset = maturityOffset(p.sex, age, m)
   const phase = phaseOf(offset)
@@ -57,7 +58,7 @@ export function derive(p: Player, lang: Lang): PlayerView {
     alerts.push({ level: lvl, text: `${es ? 'Dolor' : 'Dolor'}: ${zone(pain.zone, lang).toLowerCase()} ${pain.level}/10${weeks}` })
     if (pain.stopped) alerts.push({ level: 'bad', text: es ? 'No ha podido entrenar esta semana' : 'No ha pogut entrenar aquesta setmana' })
   }
-  if (now <= prevAvg - 0.8) alerts.push({ level: 'warn', text: es ? 'Bienestar a la baja respecto a las últimas semanas' : 'Benestar a la baixa respecte a les últimes setmanes' })
+  if (prev.length && now <= prevAvg - 0.8) alerts.push({ level: 'warn', text: es ? 'Bienestar a la baja respecto a las últimas semanas' : 'Benestar a la baixa respecte a les últimes setmanes' })
   if (last?.comment) alerts.push({ level: 'info', text: `${es ? 'Comentario' : 'Comentari'}: «${last.comment}»` })
 
   const level = alerts.reduce<'ok' | 'warn' | 'bad'>((acc, a) => (rank[a.level] > rank[acc] ? (a.level as 'warn' | 'bad') : acc), 'ok')
@@ -69,15 +70,17 @@ export function derive(p: Player, lang: Lang): PlayerView {
   }
 }
 
-export function deriveTeam(t: Team, lang: Lang) {
-  return t.players.map((p) => derive(p, lang))
+export function deriveTeam(t: Team, lang: Lang): PlayerView[] {
+  return t.players.map((p) => derive(p, lang)).filter((v): v is PlayerView => v !== null)
 }
 
 export function fmt(n: number, d = 1) {
+  if (!Number.isFinite(n)) return '—'
   return n.toLocaleString('es-ES', { minimumFractionDigits: d, maximumFractionDigits: d })
 }
 
 export function signed(n: number) {
+  if (!Number.isFinite(n)) return '—'
   return (n >= 0 ? '+' : '−') + fmt(Math.abs(n))
 }
 

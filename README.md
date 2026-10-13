@@ -11,6 +11,15 @@ Calcula la fase de maduració (Mirwald et al., 2002), avisa l'entrenador i gener
 - `npm run dev` per treballar-hi en local
 - `npm run build` per generar la versió final a `dist/`
 
+## Base de dades (Supabase)
+
+1. Crea un projecte a [supabase.com](https://supabase.com) a la regió **Central EU (Frankfurt)**.
+2. Obre **SQL Editor → New query**, enganxa tot el contingut de `supabase/schema.sql` i prem **Run**.
+3. A **Authentication → URL Configuration**, posa l'adreça de l'app a **Site URL**.
+4. Posa la *Project URL* i la clau *anon / publishable* a les variables `VITE_SUPABASE_URL` i `VITE_SUPABASE_ANON_KEY` (fitxer `.env` o al panell del hosting).
+
+Sense aquestes variables, l'app s'obre en mode demo.
+
 ## Publicar-la
 
 Importa aquest repositori a [Vercel](https://vercel.com/new) i prem **Deploy**. No cal configurar res.
