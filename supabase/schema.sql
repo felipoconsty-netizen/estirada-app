@@ -134,3 +134,5 @@ revoke all on function survey_team(uuid) from public;
 revoke all on function submit_survey(uuid, uuid, int, int, int, int, int, text, int, text, boolean, text) from public;
 grant execute on function survey_team(uuid) to anon, authenticated;
 grant execute on function submit_survey(uuid, uuid, int, int, int, int, int, text, int, text, boolean, text) to anon, authenticated;
+
+grant select, insert, update, delete on profiles, teams, players, measures, wellness, injuries to authenticated;
