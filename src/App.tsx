@@ -3,6 +3,7 @@ import { WEEKS, type Injury, type Player, type Team } from '@/lib/data'
 import { derive, deriveTeam, firstName, fmt, mondaySummary, signed, type Level, type PlayerView } from '@/lib/derive'
 import { DICT, zone, type Dict } from '@/lib/i18n'
 import { ageAt, growthVelocity, maturityOffset, phaseOf, RECOS, type Lang, type Measure } from '@/lib/phv'
+import { InstallButton } from '@/components/Install'
 import { GrowthChart, MaturityMap, OffsetGauge, Sparkline, WellnessChart } from '@/components/Charts'
 
 type Tab = 'team' | 'player' | 'measure' | 'survey' | 'family' | 'club' | 'manage'
@@ -26,6 +27,7 @@ export interface Actions {
   addInjury: (playerId: string, i: Injury) => Promise<void>
   setInjuryStatus: (id: string, status: Injury['status']) => Promise<void>
   newSurveyLink: (teamId: string) => Promise<void>
+  deleteMeasure: (playerId: string, date: string) => Promise<void>
 }
 
 export interface WorkspaceProps {
@@ -118,6 +120,7 @@ export default function Workspace({ demo, teams: initial, club, today, actions, 
           </nav>
           <div className="order-2 md:order-3 ml-auto flex items-center gap-2">
             <span className="hidden sm:inline text-[12px] muted">{club.name}</span>
+            <InstallButton lang={lang} compact />
             <LangToggle lang={lang} setLang={setLang} />
             {account}
           </div>
@@ -132,6 +135,10 @@ export default function Workspace({ demo, teams: initial, club, today, actions, 
             {tab === 'team' && <TeamView t={t} lang={lang} demo={demo} today={today} teams={teams} team={team} views={views} pickTeam={pickTeam} openPlayer={openPlayer} openMeasure={openMeasure} goManage={manage ? () => setTab('manage') : undefined} />}
             {tab === 'player' && player && <PlayerScreen t={t} lang={lang} today={today} team={team} player={player} setPlayerId={setPlayerId} goFamily={() => setTab('family')} goMeasure={() => openMeasure(player.id)}
               onAddInjury={(i) => (demo ? updatePlayer(player.id, (p) => ({ ...p, injuries: [i, ...p.injuries] })) : run(() => actions!.addInjury(player.id, i), t.done))}
+              onDeleteMeasure={(date) => {
+                updatePlayer(player.id, (p) => ({ ...p, measures: p.measures.filter((x) => x.date !== date) }))
+                if (!demo) run(() => actions!.deleteMeasure(player.id, date), t.done)
+              }}
               onInjuryStatus={(i, st) => (demo ? updatePlayer(player.id, (p) => ({ ...p, injuries: p.injuries.map((x) => (x === i ? { ...x, status: st } : x)) })) : run(() => actions!.setInjuryStatus(i.id!, st)))} />}
             {tab === 'measure' && player && <MeasureView t={t} lang={lang} demo={demo} today={today} team={team} initialId={player.id}
               onSave={(id, m) => {
@@ -293,7 +300,7 @@ function PlayerSelect({ t, team, player, setPlayerId }: { t: Dict; team: Team; p
   )
 }
 
-function PlayerScreen({ t, lang, today, team, player, setPlayerId, goFamily, goMeasure, onAddInjury, onInjuryStatus }: { t: Dict; lang: Lang; today: string; team: Team; player: Player; setPlayerId: (id: string) => void; goFamily: () => void; goMeasure: () => void; onAddInjury: (i: Injury) => void; onInjuryStatus: (i: Injury, s: Injury['status']) => void }) {
+function PlayerScreen({ t, lang, today, team, player, setPlayerId, goFamily, goMeasure, onAddInjury, onInjuryStatus, onDeleteMeasure }: { t: Dict; lang: Lang; today: string; team: Team; player: Player; setPlayerId: (id: string) => void; goFamily: () => void; goMeasure: () => void; onAddInjury: (i: Injury) => void; onInjuryStatus: (i: Injury, s: Injury['status']) => void; onDeleteMeasure: (date: string) => void }) {
   const v = derive(player, lang)
   if (!v) return (
     <div className="grid gap-6">
@@ -387,6 +394,33 @@ function PlayerScreen({ t, lang, today, team, player, setPlayerId, goFamily, goM
           {v.wellnessSeries.length >= 2 && <div className="flex items-center gap-2 text-[12px] muted"><span className="w-2.5 h-2.5 rounded-sm" style={{ background: 'var(--bad)' }} />{t.pain_week}</div>}
         </section>
       </div>
+
+      <section className="card overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 p-5 pb-3">
+          <h2 className="font-display text-[18px] font-bold">{t.history}</h2>
+          <button className="btn-ghost text-[13px]" onClick={goMeasure}>+ {t.nav_measure}</button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="grid-t min-w-[560px]">
+            <thead><tr>{[t.measure_date, t.m_height, t.m_sitting, t.m_mass, t.col_offset, ''].map((h, i) => <th key={i} className="label">{h}</th>)}</tr></thead>
+            <tbody>
+              {[...player.measures].reverse().map((m) => {
+                const o = maturityOffset(player.sex, ageAt(player.dob, m.date), m)
+                return (
+                  <tr key={m.date} style={{ cursor: 'default' }}>
+                    <td className="font-mono text-[13px]">{new Date(m.date + 'T12:00:00').toLocaleDateString('es-ES')}</td>
+                    <td className="num font-mono text-[13px]">{fmt(m.height)}</td>
+                    <td className="num font-mono text-[13px]">{fmt(m.sitting)}</td>
+                    <td className="num font-mono text-[13px]">{fmt(m.mass)}</td>
+                    <td className="num font-mono text-[13px]">{signed(o)}</td>
+                    <td className="text-right"><button className="text-[13px] underline tx-bad" onClick={() => confirm(t.delete_measure_q) && onDeleteMeasure(m.date)}>{t.delete}</button></td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   )
 }
@@ -643,9 +677,12 @@ function FamilyView({ t, lang, club, team, player, setPlayerId, goMeasure }: { t
           <h1 className="font-display text-[34px] md:text-[40px] font-bold leading-none">{t.family_title}</h1>
           <p className="muted">{t.family_sub}</p>
         </div>
-        <PlayerSelect t={t} team={team} player={player} setPlayerId={setPlayerId} />
+        <div className="flex flex-wrap items-end gap-3 no-print">
+          <PlayerSelect t={t} team={team} player={player} setPlayerId={setPlayerId} />
+          <button className="btn-ghost" onClick={() => window.print()}>{t.print}</button>
+        </div>
       </div>
-      <article className="card mx-auto w-full max-w-[760px] p-6 md:p-10 grid gap-6">
+      <article className="card print-area mx-auto w-full max-w-[760px] p-6 md:p-10 grid gap-6">
         <header className="flex flex-wrap items-start justify-between gap-4 line-b pb-5">
           <div className="grid gap-1">
             <div className="label">{club.name ? `${club.name} · ` : ''}{team.name}</div>

@@ -7,6 +7,7 @@ import { fmt } from '@/lib/derive'
 import { DICT, zone, type Dict } from '@/lib/i18n'
 import { ageAt, type Lang, type Sex } from '@/lib/phv'
 import { configured, supabase } from '@/lib/supabase'
+import { InstallButton } from '@/components/Install'
 
 /* ───────────── Arrel: enrutament senzill ───────────── */
 
@@ -97,6 +98,7 @@ function AuthScreen({ lang, setLang, onDemo }: { lang: Lang; setLang: (l: Lang) 
         </div>
       </form>
       <button className="btn-ghost w-full justify-center mt-4" onClick={onDemo}>{t.see_demo}</button>
+      <div className="flex justify-center mt-3"><InstallButton lang={lang} compact /></div>
       <p className="text-[12px] faint mt-6">{t.disclaimer_real}</p>
     </Shell>
   )
@@ -124,6 +126,8 @@ function Signed({ lang, setLang, email }: { lang: Lang; setLang: (l: Lang) => vo
   const [profile, setProfile] = useState<db.Profile | null | undefined>(undefined)
   const [teams, setTeams] = useState<db.DbTeam[] | null>(null)
   const [err, setErr] = useState('')
+  const [view, setView] = useState<'app' | 'privacy'>('app')
+  const [editProfile, setEditProfile] = useState(false)
 
   const reload = useCallback(async () => {
     try { setTeams(await db.loadTeams()) } catch (e) { setErr((e as Error).message) }
@@ -143,15 +147,64 @@ function Signed({ lang, setLang, email }: { lang: Lang; setLang: (l: Lang) => vo
       <div className="card absolute right-0 mt-2 p-4 grid gap-2 w-[240px] z-20 text-[13.5px]">
         <div className="font-medium">{profile.coach_name}</div>
         <div className="muted break-all">{email}</div>
-        <button className="btn-ghost justify-center mt-1" onClick={logout}>{t.logout}</button>
+        <button className="btn-ghost justify-center mt-1" onClick={(e) => { (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; setEditProfile(true) }}>{t.edit_profile}</button>
+        <button className="btn-ghost justify-center" onClick={(e) => { (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; setView('privacy') }}>{t.privacy}</button>
+        <button className="btn-ghost justify-center" onClick={logout}>{t.logout}</button>
       </div>
     </details>
   )
 
+  if (view === 'privacy') return <Consent lang={lang} setLang={setLang} club={profile.club_name} back={() => setView('app')} />
+
   return (
+    <>
+    {editProfile && <ProfileSheet t={t} value={profile} onClose={() => setEditProfile(false)} onSave={async (p) => { await db.saveProfile(p); setProfile(p); setEditProfile(false) }} />}
     <Workspace demo={false} teams={teams} club={{ name: profile.club_name, town: profile.town }} today={todayISO()} lang={lang} setLang={setLang} account={account}
-      actions={{ saveMeasure: wrap(db.saveMeasure), addInjury: wrap(db.addInjury), setInjuryStatus: wrap(db.setInjuryStatus), newSurveyLink: wrap(db.newSurveyLink) }}
+      actions={{ saveMeasure: wrap(db.saveMeasure), addInjury: wrap(db.addInjury), setInjuryStatus: wrap(db.setInjuryStatus), newSurveyLink: wrap(db.newSurveyLink), deleteMeasure: wrap(db.deleteMeasure) }}
       manage={({ t, lang, teams, toast }) => <Manage t={t} lang={lang} teams={teams} profile={profile} toast={toast} reload={reload} />} />
+    </>
+  )
+}
+
+function ProfileSheet({ t, value, onSave, onClose }: { t: Dict; value: db.Profile; onSave: (p: db.Profile) => Promise<void>; onClose: () => void }) {
+  const [p, setP] = useState(value)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  return (
+    <div className="sheet-bg" role="dialog" aria-modal="true" aria-labelledby="prof-h" onClick={onClose}>
+      <form className="sheet grid gap-4" onClick={(e) => e.stopPropagation()} onSubmit={async (e) => { e.preventDefault(); setBusy(true); try { await onSave({ club_name: p.club_name.trim(), town: p.town.trim(), coach_name: p.coach_name.trim() }) } catch (x) { setErr((x as Error).message); setBusy(false) } }}>
+        <h2 id="prof-h" className="font-display text-[20px] font-bold">{t.edit_profile}</h2>
+        <label className="field"><span className="text-[13px] font-medium">{t.coach_name}</span><input required value={p.coach_name} onChange={(e) => setP({ ...p, coach_name: e.target.value })} /></label>
+        <label className="field"><span className="text-[13px] font-medium">{t.club_name}</span><input required value={p.club_name} onChange={(e) => setP({ ...p, club_name: e.target.value })} /></label>
+        <label className="field"><span className="text-[13px] font-medium">{t.town} <span className="faint">({t.optional})</span></span><input value={p.town} onChange={(e) => setP({ ...p, town: e.target.value })} /></label>
+        {err && <p className="tx-bad text-[14px]">{err}</p>}
+        <div className="flex gap-2"><button className="btn" disabled={busy}>{t.save_btn}</button><button className="btn-ghost" type="button" onClick={onClose}>{t.cancel}</button></div>
+      </form>
+    </div>
+  )
+}
+
+/** Model de consentiment imprimible per a les famílies. */
+function Consent({ lang, setLang, club, back }: { lang: Lang; setLang: (l: Lang) => void; club: string; back: () => void }) {
+  const t = DICT[lang]
+  return (
+    <div className="min-h-full">
+      <header className="no-print mx-auto w-full max-w-[760px] px-4 pt-6 pb-4 flex flex-wrap items-center gap-3">
+        <button className="btn-ghost" onClick={back}>← {t.back}</button>
+        <button className="btn" onClick={() => window.print()}>{t.consent_print}</button>
+        <span className="ml-auto"><LangToggle lang={lang} setLang={setLang} /></span>
+      </header>
+      <p className="no-print mx-auto max-w-[760px] px-4 pb-4 muted text-[14px]">{t.consent_intro}</p>
+      <article className="card print-area mx-auto w-full max-w-[760px] p-6 md:p-10 grid gap-4 mb-10 text-[15px] leading-relaxed">
+        <div className="flex items-center gap-2"><Logo /><span className="font-display font-bold">{club}</span></div>
+        <h1 className="font-display text-[26px] font-bold">{t.consent_title}</h1>
+        {t.consent_body.map((para, i) => <p key={i}>{para.replace('{club}', club)}</p>)}
+        <p className="flex gap-3 items-start mt-2"><span className="inline-block w-4 h-4 border border-current mt-1 shrink-0" />{t.consent_accept}</p>
+        <div className="grid sm:grid-cols-2 gap-x-8 gap-y-6 mt-4">
+          {t.consent_sign.map((f) => <div key={f} className="grid gap-1"><div className="h-8 border-b border-current" /><span className="text-[12px] muted">{f}</span></div>)}
+        </div>
+      </article>
+    </div>
   )
 }
 
@@ -212,13 +265,14 @@ function Manage({ t, lang, teams, profile, toast, reload }: { t: Dict; lang: Lan
             <div className="flex flex-wrap gap-2">
               <button className="btn" onClick={() => setEditPlayer({ teamId: tm.id, v: { ...emptyPlayer } })}>+ {t.add_player}</button>
               <button className="btn-ghost" onClick={() => setEditTeam({ id: tm.id, name: tm.name, coach: tm.coach })}>{t.edit}</button>
+              {tm.players.length > 0 && <button className="btn-ghost" onClick={() => downloadCsv(tm, t)}>{t.export_csv}</button>}
               <button className="btn-ghost tx-bad" onClick={() => confirm(t.confirm_delete_team) && act(() => db.deleteTeam(tm.id))}>{t.delete}</button>
             </div>
           </div>
 
           {editPlayer?.teamId === tm.id && (
             <PlayerForm t={t} today={today} value={editPlayer.v} onCancel={() => setEditPlayer(null)}
-              onSave={(v) => { const ep = editPlayer; setEditPlayer(null); act(() => (ep.id ? db.updatePlayer(ep.id, v) : db.createPlayer(tm.id, v))) }} />
+              isNew={!editPlayer.id} onSave={(v) => { const ep = editPlayer; setEditPlayer(null); act(() => (ep.id ? db.updatePlayer(ep.id, v) : db.createPlayer(tm.id, v))) }} />
           )}
 
           {tm.players.length === 0 ? <p className="muted text-[14px]">{t.no_players}</p> : (
@@ -249,8 +303,28 @@ function Manage({ t, lang, teams, profile, toast, reload }: { t: Dict; lang: Lan
   )
 }
 
-function PlayerForm({ t, today, value, onSave, onCancel }: { t: Dict; today: string; value: db.PlayerInput; onSave: (v: db.PlayerInput) => void; onCancel: () => void }) {
+/** Exporta l'equip (jugadors + mesures) en CSV amb ; per obrir-lo directament amb Excel. */
+function downloadCsv(tm: Team, t: Dict) {
+  const head = [t.col_player, t.sex, t.dob, t.father_h, t.mother_h, t.measure_date, t.m_height, t.m_sitting, t.m_mass]
+  const num = (n: number | null | undefined) => (n == null || !Number.isFinite(n) ? '' : String(n).replace('.', ','))
+  const q = (x: string) => (/[;"\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x)
+  const rows: string[][] = []
+  for (const p of tm.players) {
+    const base = [p.name, p.sex, p.dob, num(p.father), num(p.mother)]
+    if (p.measures.length === 0) rows.push([...base, '', '', '', ''])
+    for (const m of p.measures) rows.push([...base, m.date, num(m.height), num(m.sitting), num(m.mass)])
+  }
+  const csv = '\ufeff' + [head, ...rows].map((r) => r.map(q).join(';')).join('\r\n')
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+  a.download = `${tm.name.replace(/[^\p{L}\p{N}]+/gu, '-')}.csv`
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+}
+
+function PlayerForm({ t, today, value, isNew, onSave, onCancel }: { t: Dict; today: string; value: db.PlayerInput; isNew: boolean; onSave: (v: db.PlayerInput) => void; onCancel: () => void }) {
   const [v, setV] = useState(value)
+  const [ok, setOk] = useState(!isNew)
   const [f, setF] = useState(value.father?.toString() ?? '')
   const [m, setM] = useState(value.mother?.toString() ?? '')
   const parse = (x: string) => { const n = parseFloat(x.replace(',', '.')); return Number.isFinite(n) && n > 130 && n < 230 ? n : null }
@@ -265,6 +339,7 @@ function PlayerForm({ t, today, value, onSave, onCancel }: { t: Dict; today: str
       <label className="field"><span className="text-[13px] font-medium">{t.dob}</span><input type="date" required min={minDob} max={today} value={v.dob} onChange={(e) => setV({ ...v, dob: e.target.value })} /></label>
       <label className="field"><span className="text-[13px] font-medium">{t.father_h} <span className="faint">({t.optional})</span></span><input inputMode="decimal" value={f} onChange={(e) => setF(e.target.value)} /></label>
       <label className="field"><span className="text-[13px] font-medium">{t.mother_h} <span className="faint">({t.optional})</span></span><input inputMode="decimal" value={m} onChange={(e) => setM(e.target.value)} /></label>
+      {isNew && <label className="sm:col-span-3 flex gap-2.5 items-start text-[14px]"><input type="checkbox" className="mt-1 w-4 h-4" required checked={ok} onChange={(e) => setOk(e.target.checked)} onInvalid={(e) => (e.target as HTMLInputElement).setCustomValidity(t.consent_need)} onInput={(e) => (e.target as HTMLInputElement).setCustomValidity('')} /><span>{t.consent_check}</span></label>}
       <div className="sm:col-span-3 flex gap-2"><button className="btn" type="submit">{t.save_btn}</button><button className="btn-ghost" type="button" onClick={onCancel}>{t.cancel}</button></div>
     </form>
   )
@@ -299,7 +374,7 @@ function PublicSurvey({ token, lang, setLang }: { token: string; lang: Lang; set
   return (
     <div className="min-h-screen">
       <header className="px-4 py-3 flex items-center gap-2 line-b" style={{ background: 'var(--surface)' }}>
-        <Logo /><span className="font-display font-bold">Estirada</span><span className="ml-auto mr-2 text-[12px] muted truncate">{info?.team}</span><LangToggle lang={lang} setLang={setLang} />
+        <Logo /><span className="font-display font-bold">Estirada</span><span className="ml-auto mr-2 text-[12px] muted truncate">{info?.team}</span><InstallButton lang={lang} compact /><LangToggle lang={lang} setLang={setLang} />
       </header>
       <main className="mx-auto max-w-[480px] px-4 py-6">
         {info === undefined ? <p className="muted">{t.loading}</p>
