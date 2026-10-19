@@ -52,7 +52,8 @@ export function OffsetGauge({ offset, labels }: { offset: number; labels: { befo
 /** Mapa de maduració de l'equip: cada punt és un jugador; files per evitar que s'encavalquin. */
 export function MaturityMap({ views, onPick, labels }: { views: PlayerView[]; onPick: (id: string) => void; labels: { before: string; peak: string; after: string } }) {
   const [hover, setHover] = useState<string | null>(null)
-  const min = -2.5, max = 2.5, w = 760, padX = 24
+  const offs = views.map((v) => v.offset).filter(Number.isFinite)
+  const min = Math.min(-2.5, Math.floor(Math.min(...offs, 0) * 2) / 2 - 0.5), max = Math.max(2.5, Math.ceil(Math.max(...offs, 0) * 2) / 2 + 0.5), w = 760, padX = 24
   const sx = (v: number) => padX + ((Math.max(min, Math.min(max, v)) - min) / (max - min)) * (w - padX * 2)
   const sorted = [...views].sort((a, b) => a.offset - b.offset)
   const rows: number[] = []
@@ -75,7 +76,7 @@ export function MaturityMap({ views, onPick, labels }: { views: PlayerView[]; on
         <text x={sx(0)} y={14} fontSize={12} fill="var(--bad)" fontWeight={600} textAnchor="middle">{labels.peak}</text>
         <text x={w - padX} y={14} fontSize={12} fill="var(--muted)" textAnchor="end">{labels.after} →</text>
         <line x1={padX} x2={w - padX} y1={h - 22} y2={h - 22} stroke="var(--line)" />
-        {[-2, -1, 0, 1, 2].map((t) => (
+        {Array.from({ length: Math.floor(max) - Math.ceil(min) + 1 }, (_, i) => Math.ceil(min) + i).map((t) => (
           <text key={t} x={sx(t)} y={h - 6} fontSize={12} textAnchor="middle" fill="var(--muted)" fontFamily="var(--mono)">{t > 0 ? `+${t}` : t}</text>
         ))}
         {placed.map(({ v, x, r }) => {
@@ -85,7 +86,7 @@ export function MaturityMap({ views, onPick, labels }: { views: PlayerView[]; on
             <g key={v.p.id} onMouseEnter={() => setHover(v.p.id)} onMouseLeave={() => setHover(null)} onClick={() => onPick(v.p.id)} style={{ cursor: 'pointer' }}>
               <rect x={x - 46} y={y - 12} width={92} height={24} fill="transparent" />
               <circle cx={x} cy={y} r={active ? 7 : 6} fill={LV[v.level]} stroke="var(--surface)" strokeWidth={2} />
-              <text x={x + 10} y={y + 4} fontSize={12.5} fill="var(--fg)" fontWeight={active ? 600 : 400}>{firstName(v.p.name)}</text>
+              <text x={x > w - 110 ? x - 10 : x + 10} y={y + 4} textAnchor={x > w - 110 ? 'end' : 'start'} fontSize={12.5} fill="var(--fg)" fontWeight={active ? 600 : 400}>{firstName(v.p.name)}</text>
               {active && (
                 <g>
                   <rect x={Math.min(x - 10, w - 190)} y={y + 12} width={180} height={26} rx={6} fill="var(--fg)" />

@@ -8,7 +8,7 @@ import { DICT, zone, type Dict } from '@/lib/i18n'
 import { ageAt, type Lang, type Sex } from '@/lib/phv'
 import { configured, supabase } from '@/lib/supabase'
 import { InstallButton } from '@/components/Install'
-import { normName, readTable, rowsToPlayers, type ImportRow } from '@/lib/importer'
+import { normName, readTables, sheetsToPlayers, type ImportRow } from '@/lib/importer'
 
 /* ───────────── Arrel: enrutament senzill ───────────── */
 
@@ -334,7 +334,7 @@ function ImportSheet({ t, team, today, onClose, onImport }: { t: Dict; team: Tea
     if (!f) return
     setMsg(t.import_reading); setItems(null)
     try {
-      const rows = rowsToPlayers(await readTable(f), today)
+      const rows = sheetsToPlayers(await readTables(f), today)
       if (!rows) return setMsg(t.import_no_header)
       if (!rows.length) return setMsg(t.import_empty)
       const byName = new Map(team.players.map((p) => [normName(p.name), p]))
