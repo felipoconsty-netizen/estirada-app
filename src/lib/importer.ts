@@ -1,3 +1,4 @@
+import type { Wellness } from './data'
 import type { Measure, Sex } from './phv'
 
 type Cell = string | number | boolean | Date | null | undefined
@@ -10,6 +11,8 @@ export interface ImportRow {
   father: number | null
   mother: number | null
   measures: Measure[]
+  /** Respostes del qüestionari setmanal (week = dilluns, ISO). */
+  wellness: Wellness[]
   problems: ('dob' | 'sex' | 'measure')[]
 }
 
@@ -103,7 +106,7 @@ export function sheetsToPlayers(sheets: Cell[][][], today: string): ImportRow[] 
     const at = (f: Field) => { const i = t.map.indexOf(f); return i >= 0 ? r[i] : null }
     // Una fila de jugador/a té un nom curt i alguna dada (data de naixement o una mesura); així es descarten notes i avisos.
     const data = toISODate(at('dob')) || (['height', 'sitting', 'mass'] as Field[]).some((f) => toNumber(at(f)) != null)
-    if (name && name.length <= 60 && data && !players.has(norm(name))) players.set(norm(name), { name, sex: null, dob: null, father: null, mother: null, measures: [], problems: [], parts: [] })
+    if (name && name.length <= 60 && data && !players.has(norm(name))) players.set(norm(name), { name, sex: null, dob: null, father: null, mother: null, measures: [], wellness: [], problems: [], parts: [] })
   }
   for (const t of tables) {
     const get = (r: Cell[], f: Field) => { const i = t.map.indexOf(f); return i >= 0 ? r[i] : null }
@@ -119,6 +122,7 @@ export function sheetsToPlayers(sheets: Cell[][][], today: string): ImportRow[] 
       if (h != null || si != null || w != null) p.parts.push({ date: toISODate(get(r, 'date')), height: h ?? undefined, sitting: si ?? undefined, mass: w ?? undefined })
     }
   }
+  const answers = surveyAnswers(sheets, [...players.values()].map((p) => p.name), today)
   return [...players.values()].map(({ parts, ...p }) => {
     // Ajunta les mesures del mateix dia (p. ex. alçada en un full i alçada asseguda en un altre).
     const byDate = new Map<string, Partial>()
@@ -141,6 +145,7 @@ export function sheetsToPlayers(sheets: Cell[][][], today: string): ImportRow[] 
       else if (!p.problems.includes('measure')) p.problems.push('measure')
     }
     p.measures.sort((a, b) => a.date.localeCompare(b.date))
+    p.wellness = answers.get(norm(p.name)) ?? []
     if (!p.dob || p.dob > today || +p.dob.slice(0, 4) < +today.slice(0, 4) - 22) { p.dob = null; p.problems.unshift('dob') }
     return p
   })
@@ -179,6 +184,64 @@ export function toSex(v: Cell): Sex | null {
   if (/^(f|fem|femeni|femenino|female|noia|chica|nena|nina|dona|mujer|girl|w)/.test(s)) return 'F'
   if (/^(m|h|masc|masculi|masculino|male|noi|chico|nen|nino|home|hombre|boy|v|var)/.test(s)) return 'M'
   return null
+}
+
+type SurveyField = 'when' | 'who' | 'hasPain' | 'zone' | 'level' | 'side' | 'stopped' | 'energy' | 'sleep' | 'legs' | 'stress' | 'mood' | 'comment'
+function surveyField(header: unknown): SurveyField | null {
+  const h = norm(header)
+  if (!h) return null
+  if (/^(timestamp|marca temporal|marca de temps|fecha|data|date)\b/.test(h)) return 'when'
+  if (/qui ets|quien eres|who are you|\bnom\b|nombre|jugador|jugadora|name/.test(h)) return 'who'
+  if (/energ/.test(h)) return 'energy'
+  if (/\bson\b|sueno|sleep|dormit|dormido/.test(h)) return 'sleep'
+  if (/cames|piernas|legs|muscul/.test(h)) return 'legs'
+  if (/estres|stress/.test(h)) return 'stress'
+  if (/anim|mood|humor/.test(h)) return 'mood'
+  if (/coment|comment/.test(h)) return 'comment'
+  if (/costat|lado|side/.test(h)) return 'side'
+  if (/impedit|impedido|entrenar|parar|stopped/.test(h)) return 'stopped'
+  if (/quant de dolor|cuanto dolor|intensitat|intensidad|nivell|nivel|0 10/.test(h)) return 'level'
+  if (/on tens|donde tienes|zona|where/.test(h)) return 'zone'
+  if (/(algun|alguna) (dolor|molest)/.test(h)) return 'hasPain'
+  return null
+}
+
+/** Setmana (dilluns) a què es refereix una resposta: la del diumenge més recent, igual que a l'app. */
+const monday = (iso: string) => { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 6); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10) }
+const score = (v: Cell) => { const n = toNumber(v); return n != null && n >= 1 && n <= 5 ? Math.round(n) : null }
+
+/** Busca un full de respostes de formulari (Google Forms) i en treu el benestar setmanal de cada jugador/a. */
+export function surveyAnswers(sheets: Cell[][][], names: string[], today: string): Map<string, Wellness[]> {
+  const out = new Map<string, Map<string, Wellness & { at: string }>>()
+  const byFirst = new Map<string, string | null>()
+  for (const n of names) { const f = norm(n).split(' ')[0]; byFirst.set(f, byFirst.has(f) ? null : norm(n)) }
+  const resolve = (who: string) => { const k = norm(who); return names.some((n) => norm(n) === k) ? k : byFirst.get(k.split(' ')[0]) ?? (k.includes(' ') ? null : null) }
+  for (const sheet of sheets) {
+    let map: (SurveyField | null)[] | null = null
+    for (const row of sheet) {
+      const m = row.map(surveyField)
+      if (['energy', 'sleep', 'legs', 'stress', 'mood'].filter((f) => m.includes(f as SurveyField)).length >= 4 && m.includes('who')) { map = m; continue }
+      if (!map) continue
+      const g = (f: SurveyField) => { const i = map!.indexOf(f); return i >= 0 ? row[i] : null }
+      const key = resolve(String(g('who') ?? ''))
+      const at = toISODate(g('when'))
+      const vals = { energy: score(g('energy')), sleep: score(g('sleep')), legs: score(g('legs')), stress: score(g('stress')), mood: score(g('mood')) }
+      if (!key || !at || at > today || Object.values(vals).some((v) => v == null)) continue
+      const zone = String(g('zone') ?? '').trim()
+      const hasPain = zone && !/^(no|res|nada|cap)$/i.test(norm(g('hasPain')))
+      const lvl = toNumber(g('level'))
+      const w: Wellness & { at: string } = {
+        week: monday(at), at, ...(vals as Record<keyof typeof vals, number>),
+        pain: hasPain ? { zone, level: lvl != null ? Math.max(0, Math.min(10, Math.round(lvl))) : 0, side: String(g('side') ?? '').trim(), stopped: !/^no\b/.test(norm(g('stopped'))) && !!norm(g('stopped')) } : null,
+        comment: String(g('comment') ?? '').trim().slice(0, 500) || undefined,
+      }
+      const weeks = out.get(key) ?? new Map()
+      const prev = weeks.get(w.week)
+      if (!prev || prev.at <= at) weeks.set(w.week, w)
+      out.set(key, weeks)
+    }
+  }
+  return new Map([...out].map(([k, weeks]) => [k, [...weeks.values()].sort((a, b) => a.week.localeCompare(b.week)).map(({ at: _, ...w }) => w)]))
 }
 
 export const normName = norm

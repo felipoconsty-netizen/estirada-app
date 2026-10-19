@@ -43,8 +43,9 @@ export interface WorkspaceProps {
 
 export const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10) }
 /** Dilluns de la setmana d'una data ISO, com a etiqueta d/m. */
+/** Setmana del qüestionari (el seu dilluns). Es respon en diumenge, així que de dilluns a dissabte encara es mira la setmana anterior. */
 export function mondayLabel(iso: string) {
-  const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
+  const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() - 6); d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
   return `${d.getDate()}/${d.getMonth() + 1}`
 }
 

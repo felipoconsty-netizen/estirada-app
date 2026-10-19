@@ -114,7 +114,7 @@ export async function submitSurvey(token: string, player: string, w: Omit<Wellne
 }
 
 /** Importació massiva: crea les jugadores noves (o actualitza les que ja hi són per nom) i desa totes les mesures. */
-export async function importPlayers(teamId: string, rows: { id?: string; p: PlayerInput; measures: Measure[] }[]) {
+export async function importPlayers(teamId: string, rows: { id?: string; p: PlayerInput; measures: Measure[]; wellness?: Wellness[] }[]) {
   const fresh = rows.filter((r) => !r.id)
   const created = fresh.length
     ? check(await sb().from('players').insert(fresh.map((r) => ({ team_id: teamId, ...r.p }))).select('id')) as { id: string }[]
@@ -123,4 +123,12 @@ export async function importPlayers(teamId: string, rows: { id?: string; p: Play
   for (const r of rows.filter((x) => !fresh.includes(x))) check(await sb().from('players').update(r.p).eq('id', r.id!))
   const ms = rows.flatMap((r) => r.measures.map((m) => ({ player_id: r.id!, ...m })))
   if (ms.length) check(await sb().from('measures').upsert(ms, { onConflict: 'player_id,date' }))
+  const ws = rows.flatMap((r) => (r.wellness ?? []).map((w) => ({
+    player_id: r.id!, week: w.week, energy: w.energy, sleep: w.sleep, legs: w.legs, stress: w.stress, mood: w.mood,
+    pain_zone: w.pain?.zone ?? null, pain_level: w.pain?.level ?? null, pain_side: w.pain?.side || null, pain_stopped: w.pain?.stopped ?? null, comment: w.comment ?? null,
+  })))
+  if (ws.length) {
+    const owner = (await sb().auth.getUser()).data.user?.id
+    check(await sb().from('wellness').upsert(ws.map((w) => ({ ...w, owner })), { onConflict: 'player_id,week' }))
+  }
 }

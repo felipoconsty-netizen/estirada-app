@@ -323,7 +323,7 @@ function saveText(text: string, filename: string) {
 }
 
 type ImportItem = ImportRow & { id?: string }
-function ImportSheet({ t, team, today, onClose, onImport }: { t: Dict; team: Team; today: string; onClose: () => void; onImport: (rows: { id?: string; p: db.PlayerInput; measures: ImportRow['measures'] }[]) => Promise<void> }) {
+function ImportSheet({ t, team, today, onClose, onImport }: { t: Dict; team: Team; today: string; onClose: () => void; onImport: (rows: { id?: string; p: db.PlayerInput; measures: ImportRow['measures']; wellness: ImportRow['wellness'] }[]) => Promise<void> }) {
   const [items, setItems] = useState<ImportItem[] | null>(null)
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
@@ -361,7 +361,7 @@ function ImportSheet({ t, team, today, onClose, onImport }: { t: Dict; team: Tea
           <>
             <div className="overflow-x-auto max-h-[46vh]">
               <table className="grid-t">
-                <thead><tr>{[t.col_player, t.dob, t.sex, t.import_measures_n].map((h, i) => <th key={i} className="label">{h}</th>)}</tr></thead>
+                <thead><tr>{[t.col_player, t.dob, t.sex, t.import_measures_n, t.import_answers_n].map((h, i) => <th key={i} className="label">{h}</th>)}</tr></thead>
                 <tbody>
                   {items.map((r, i) => (
                     <tr key={i} style={{ cursor: 'default' }}>
@@ -370,6 +370,7 @@ function ImportSheet({ t, team, today, onClose, onImport }: { t: Dict; team: Tea
                         : <input type="date" aria-label={`${t.dob} ${r.name}`} className="text-[13px] border rounded px-1 py-0.5 w-[8.5rem]" style={{ borderColor: 'var(--bad)' }} min={minDob} max={today} value={r.dob ?? ''} onChange={(e) => set(i, { dob: e.target.value || null })} />}</td>
                       <td className="text-[13px]">{(r.sex ?? sex)}{!r.sex && <span className="faint">*</span>}</td>
                       <td className="num font-mono text-[13px]">{r.measures.length}</td>
+                      <td className="num font-mono text-[13px]">{r.wellness.length}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -386,7 +387,7 @@ function ImportSheet({ t, team, today, onClose, onImport }: { t: Dict; team: Tea
         )}
         <div className="flex gap-2">
           {items && <button className="btn" disabled={busy || ready.length === 0 || (items.some((r) => !r.id) && !ok)}
-            onClick={async () => { setBusy(true); await onImport(ready.map((r) => ({ id: r.id, measures: r.measures, p: { name: r.name, sex: r.sex ?? sex, dob: r.dob!, father: r.father, mother: r.mother } }))) }}>
+            onClick={async () => { setBusy(true); await onImport(ready.map((r) => ({ id: r.id, measures: r.measures, wellness: r.wellness, p: { name: r.name, sex: r.sex ?? sex, dob: r.dob!, father: r.father, mother: r.mother } }))) }}>
             {t.import_btn.replace('{n}', String(ready.length))}</button>}
           <button className="btn-ghost" type="button" onClick={onClose}>{t.cancel}</button>
         </div>

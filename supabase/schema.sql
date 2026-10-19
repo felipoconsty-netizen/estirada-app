@@ -118,7 +118,7 @@ $$;
 create or replace function submit_survey(token uuid, player uuid, energy int, sleep int, legs int, stress int, mood int,
   pain_zone text, pain_level int, pain_side text, pain_stopped boolean, comment text)
 returns boolean language plpgsql security definer set search_path = public as $$
-declare o uuid; wk date := date_trunc('week', now() at time zone 'Europe/Madrid')::date;
+declare o uuid; wk date := date_trunc('week', (now() at time zone 'Europe/Madrid') - interval '6 days')::date; -- setmana del diumenge més recent
 begin
   select p.owner into o from players p join teams t on t.id = p.team_id where p.id = player and t.survey_token = token;
   if o is null then return false; end if;
