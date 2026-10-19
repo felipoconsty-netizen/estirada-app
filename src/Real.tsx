@@ -8,6 +8,7 @@ import { DICT, zone, type Dict } from '@/lib/i18n'
 import { ageAt, type Lang, type Sex } from '@/lib/phv'
 import { configured, supabase } from '@/lib/supabase'
 import { InstallButton } from '@/components/Install'
+import { normName, readTable, rowsToPlayers, type ImportRow } from '@/lib/importer'
 
 /* ───────────── Arrel: enrutament senzill ───────────── */
 
@@ -236,6 +237,7 @@ const emptyPlayer: db.PlayerInput = { name: '', sex: 'F', dob: '', father: null,
 function Manage({ t, lang, teams, profile, toast, reload }: { t: Dict; lang: Lang; teams: Team[]; profile: db.Profile; toast: (s: string) => void; reload: () => Promise<void> }) {
   const [editTeam, setEditTeam] = useState<{ id?: string; name: string; coach: string } | null>(null)
   const [editPlayer, setEditPlayer] = useState<{ teamId: string; id?: string; v: db.PlayerInput } | null>(null)
+  const [importTo, setImportTo] = useState<Team | null>(null)
   const act = async (fn: () => Promise<void>, ok = t.done) => {
     try { await fn(); await reload(); toast(ok) } catch (e) { console.error(e); toast(t.error) }
   }
@@ -257,6 +259,7 @@ function Manage({ t, lang, teams, profile, toast, reload }: { t: Dict; lang: Lan
       )}
 
       {teams.length === 0 && !editTeam && <p className="muted">{t.no_teams}</p>}
+      {importTo && <ImportSheet t={t} team={importTo} today={today} onClose={() => setImportTo(null)} onImport={async (rows) => { setImportTo(null); await act(() => db.importPlayers(importTo.id, rows), t.import_done) }} />}
 
       {teams.map((tm) => (
         <section key={tm.id} className="card p-5 grid gap-4">
@@ -265,6 +268,7 @@ function Manage({ t, lang, teams, profile, toast, reload }: { t: Dict; lang: Lan
             <div className="flex flex-wrap gap-2">
               <button className="btn" onClick={() => setEditPlayer({ teamId: tm.id, v: { ...emptyPlayer } })}>+ {t.add_player}</button>
               <button className="btn-ghost" onClick={() => setEditTeam({ id: tm.id, name: tm.name, coach: tm.coach })}>{t.edit}</button>
+              <button className="btn-ghost" onClick={() => setImportTo(tm)}>{t.import_excel}</button>
               {tm.players.length > 0 && <button className="btn-ghost" onClick={() => downloadCsv(tm, t)}>{t.export_csv}</button>}
               <button className="btn-ghost tx-bad" onClick={() => confirm(t.confirm_delete_team) && act(() => db.deleteTeam(tm.id))}>{t.delete}</button>
             </div>
@@ -304,6 +308,93 @@ function Manage({ t, lang, teams, profile, toast, reload }: { t: Dict; lang: Lan
 }
 
 /** Exporta l'equip (jugadors + mesures) en CSV amb ; per obrir-lo directament amb Excel. */
+/** Plantilla buida per omplir amb Excel. */
+function downloadTemplate(t: Dict) {
+  const head = [t.player_name, t.sex, t.dob, t.father_h, t.mother_h, t.measure_date, t.m_height, t.m_sitting, t.m_mass]
+  const ex = ['Laia Ferrer', 'F', '14/02/2013', '180', '165', '01/10/2026', '158,2', '80,1', '45']
+  saveText('﻿' + [head, ex].map((r) => r.join(';')).join('\r\n'), 'estirada-plantilla.csv')
+}
+function saveText(text: string, filename: string) {
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }))
+  a.download = filename
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+}
+
+type ImportItem = ImportRow & { id?: string }
+function ImportSheet({ t, team, today, onClose, onImport }: { t: Dict; team: Team; today: string; onClose: () => void; onImport: (rows: { id?: string; p: db.PlayerInput; measures: ImportRow['measures'] }[]) => Promise<void> }) {
+  const [items, setItems] = useState<ImportItem[] | null>(null)
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [sex, setSex] = useState<Sex>(team.players[0]?.sex ?? 'F')
+  const [ok, setOk] = useState(false)
+  const minDob = `${+today.slice(0, 4) - 22}-01-01`
+  const pick = async (f: File | undefined) => {
+    if (!f) return
+    setMsg(t.import_reading); setItems(null)
+    try {
+      const rows = rowsToPlayers(await readTable(f), today)
+      if (!rows) return setMsg(t.import_no_header)
+      if (!rows.length) return setMsg(t.import_empty)
+      const byName = new Map(team.players.map((p) => [normName(p.name), p]))
+      setItems(rows.map((r) => {
+        const ex = byName.get(normName(r.name))
+        return ex ? { ...r, id: ex.id, name: ex.name, sex: r.sex ?? ex.sex, dob: r.dob ?? ex.dob, father: r.father ?? (Number.isFinite(ex.father) ? ex.father : null), mother: r.mother ?? (Number.isFinite(ex.mother) ? ex.mother : null) } : r
+      }))
+      setMsg('')
+    } catch (e) { setMsg((e as Error).message === 'xls' ? t.import_xls : t.error) }
+  }
+  const ready = (items ?? []).filter((r) => r.dob)
+  const set = (i: number, patch: Partial<ImportItem>) => setItems(items!.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  return (
+    <div className="sheet-bg" role="dialog" aria-modal="true" aria-labelledby="imp-h" onClick={onClose}>
+      <div className="sheet grid gap-4" style={{ maxWidth: 760 }} onClick={(e) => e.stopPropagation()}>
+        <div className="grid gap-1"><div className="label">{team.name}</div><h2 id="imp-h" className="font-display text-[20px] font-bold">{t.import_title}</h2></div>
+        <p className="text-[14px] muted">{t.import_help}</p>
+        <div className="flex flex-wrap gap-2 items-center">
+          <label className="btn cursor-pointer">{t.import_choose}<input type="file" accept=".xlsx,.csv,.txt,.xls" className="sr-only" onChange={(e) => pick(e.target.files?.[0])} /></label>
+          <button type="button" className="btn-ghost" onClick={() => downloadTemplate(t)}>{t.import_template}</button>
+        </div>
+        {msg && <p className="text-[14px]" role="status">{msg}</p>}
+        {items && (
+          <>
+            <div className="overflow-x-auto max-h-[46vh]">
+              <table className="grid-t">
+                <thead><tr>{[t.col_player, t.dob, t.sex, t.import_measures_n].map((h, i) => <th key={i} className="label">{h}</th>)}</tr></thead>
+                <tbody>
+                  {items.map((r, i) => (
+                    <tr key={i} style={{ cursor: 'default' }}>
+                      <td className="font-medium">{r.name}<div className="text-[12px] font-normal">{r.id ? <span className="muted">{t.import_update}</span> : <span className="tx-ok">{t.import_new}</span>}</div>{r.problems.includes('measure') && <div className="tx-warn text-[12px] font-normal">{t.import_bad_measure}</div>}</td>
+                      <td>{r.dob && !r.problems.includes('dob') ? <span className="font-mono text-[13px]">{new Date(r.dob + 'T12:00:00').toLocaleDateString('es-ES')}</span>
+                        : <input type="date" aria-label={`${t.dob} ${r.name}`} className="text-[13px] border rounded px-1 py-0.5 w-[8.5rem]" style={{ borderColor: 'var(--bad)' }} min={minDob} max={today} value={r.dob ?? ''} onChange={(e) => set(i, { dob: e.target.value || null })} />}</td>
+                      <td className="text-[13px]">{(r.sex ?? sex)}{!r.sex && <span className="faint">*</span>}</td>
+                      <td className="num font-mono text-[13px]">{r.measures.length}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {items.some((r) => !r.sex) && (
+              <fieldset className="flex flex-wrap items-center gap-2 text-[14px]"><legend className="sr-only">{t.import_default_sex}</legend><span>* {t.import_default_sex}:</span>
+                {(['F', 'M'] as Sex[]).map((s) => <button type="button" key={s} className="pill" aria-pressed={sex === s} onClick={() => setSex(s)}>{s === 'F' ? t.female : t.male}</button>)}
+              </fieldset>
+            )}
+            {items.some((r) => !r.dob) && <p className="text-[13px] tx-warn">{t.import_need_dob}. {t.import_skip}</p>}
+            {items.some((r) => !r.id) && <label className="flex gap-2.5 items-start text-[14px]"><input type="checkbox" className="mt-1 w-4 h-4" checked={ok} onChange={(e) => setOk(e.target.checked)} /><span>{t.consent_check}</span></label>}
+          </>
+        )}
+        <div className="flex gap-2">
+          {items && <button className="btn" disabled={busy || ready.length === 0 || (items.some((r) => !r.id) && !ok)}
+            onClick={async () => { setBusy(true); await onImport(ready.map((r) => ({ id: r.id, measures: r.measures, p: { name: r.name, sex: r.sex ?? sex, dob: r.dob!, father: r.father, mother: r.mother } }))) }}>
+            {t.import_btn.replace('{n}', String(ready.length))}</button>}
+          <button className="btn-ghost" type="button" onClick={onClose}>{t.cancel}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function downloadCsv(tm: Team, t: Dict) {
   const head = [t.col_player, t.sex, t.dob, t.father_h, t.mother_h, t.measure_date, t.m_height, t.m_sitting, t.m_mass]
   const num = (n: number | null | undefined) => (n == null || !Number.isFinite(n) ? '' : String(n).replace('.', ','))

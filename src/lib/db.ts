@@ -112,3 +112,15 @@ export async function submitSurvey(token: string, player: string, w: Omit<Wellne
   }))
   if (!ok) throw new Error('invalid')
 }
+
+/** Importació massiva: crea les jugadores noves (o actualitza les que ja hi són per nom) i desa totes les mesures. */
+export async function importPlayers(teamId: string, rows: { id?: string; p: PlayerInput; measures: Measure[] }[]) {
+  const fresh = rows.filter((r) => !r.id)
+  const created = fresh.length
+    ? check(await sb().from('players').insert(fresh.map((r) => ({ team_id: teamId, ...r.p }))).select('id')) as { id: string }[]
+    : []
+  fresh.forEach((r, i) => { r.id = created[i].id })
+  for (const r of rows.filter((x) => !fresh.includes(x))) check(await sb().from('players').update(r.p).eq('id', r.id!))
+  const ms = rows.flatMap((r) => r.measures.map((m) => ({ player_id: r.id!, ...m })))
+  if (ms.length) check(await sb().from('measures').upsert(ms, { onConflict: 'player_id,date' }))
+}
