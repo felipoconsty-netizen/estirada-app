@@ -247,8 +247,26 @@ function list(vs, lang) {
   return n.slice(0, -1).join(", ") + (lang === "es" ? " y " : " i ") + n[n.length - 1];
 }
 
+// src/lib/schedule.ts
+var at = (iso2) => /* @__PURE__ */ new Date(iso2 + "T12:00:00");
+var iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+var shift = (s, n) => {
+  const d = at(s);
+  d.setDate(d.getDate() + n);
+  return iso(d);
+};
+var isoDow = (s) => (at(s).getDay() + 6) % 7 + 1;
+function pastSessions(days, today, n = 28) {
+  return Array.from({ length: n }, (_, i) => shift(today, -i)).filter((d) => days.includes(isoDow(d)));
+}
+
 // src/lib/warmup.ts
 var WARMUP_GOAL = 2;
+function sessionsDone(dates, days, today) {
+  if (!days?.length) return null;
+  const ses = pastSessions(days, today);
+  return { n: ses.filter((d) => dates.includes(d)).length, m: ses.length };
+}
 function warmupStats(dates, today, n = 4) {
   const weeks = Array.from({ length: n }, (_, i) => {
     const from = (n - 1 - i) * 7;
@@ -261,11 +279,12 @@ function warmupStats(dates, today, n = 4) {
   const level = avg >= WARMUP_GOAL ? "ok" : avg >= 1 ? "warn" : "bad";
   return { weeks, avg, last: weeks[n - 1], level, any: dates.length > 0 };
 }
-function warmupLine(dates, today, lang) {
+function warmupLine(dates, today, lang, days) {
   if (!dates?.length) return null;
   const s = warmupStats(dates, today);
   const es = lang === "es";
-  const avg = s.avg.toLocaleString("es-ES", { maximumFractionDigits: 1 });
+  const ses = sessionsDone(dates, days, today);
+  const avg = s.avg.toLocaleString("es-ES", { maximumFractionDigits: 1 }) + (ses ? ` (${ses.n} ${es ? "de" : "de"} ${ses.m} entrenos)` : "");
   if (s.level === "ok") return { level: "ok", text: es ? `Calentamiento de prevenci\xF3n: ${avg} por semana de media. Buen ritmo, es lo que protege.` : `Escalfament de prevenci\xF3: ${avg} per setmana de mitjana. Bon ritme, \xE9s el que protegeix.` };
   return { level: "warn", text: es ? `Calentamiento de prevenci\xF3n: solo ${avg} por semana de media. Para que proteja hacen falta ${WARMUP_GOAL} o m\xE1s.` : `Escalfament de prevenci\xF3: nom\xE9s ${avg} per setmana de mitjana. Perqu\xE8 protegeixi en calen ${WARMUP_GOAL} o m\xE9s.` };
 }
@@ -308,8 +327,8 @@ function surveyWeeks(players, current) {
   };
   return [.../* @__PURE__ */ new Set([...players.flatMap((p) => p.wellness.map((w) => w.week)), current])].filter((w) => key(w) <= cm * 100 + cd).sort((a, b) => key(a) - key(b));
 }
-function mondayLabel(iso) {
-  const d = /* @__PURE__ */ new Date(iso + "T12:00:00");
+function mondayLabel(iso2) {
+  const d = /* @__PURE__ */ new Date(iso2 + "T12:00:00");
   d.setDate(d.getDate() - 6);
   d.setDate(d.getDate() - (d.getDay() + 6) % 7);
   return `${d.getDate()}/${d.getMonth() + 1}`;
@@ -400,7 +419,7 @@ function weeklyEmail(teams, coach, appUrl, today) {
     const notes = conclusions(team.players, weeks, week, "ca").filter((c) => c.level === "bad" || c.level === "warn").slice(0, 8);
     const answered = team.players.filter((p) => p.wellness.some((w) => w.week === week)).length;
     const sessions = team.players.reduce((a, p) => a + loadView(p.loads, today).sessions, 0);
-    const wl = warmupLine(team.warmups, today, "ca");
+    const wl = warmupLine(team.warmups, today, "ca", team.days);
     blocks.push({ team, summary: [...mondaySummary(views, "ca"), ...wl ? [wl] : []], notes, answered, sessions });
   }
   if (!blocks.length) return null;
@@ -427,8 +446,8 @@ ${appUrl}`;
 
 // src/lib/rows.ts
 var num = (v) => v === null || v === void 0 ? NaN : Number(v);
-var weekLabel = (iso) => {
-  const [, m, d] = iso.split("-");
+var weekLabel = (iso2) => {
+  const [, m, d] = iso2.split("-");
   return `${+d}/${+m}`;
 };
 function assembleTeams({ teams, players, measures, wellness, injuries, loads, warmups = [] }) {
@@ -461,6 +480,7 @@ function assembleTeams({ teams, players, measures, wellness, injuries, loads, wa
     coach: t.coach,
     survey_token: t.survey_token,
     owner: t.owner,
+    days: Array.isArray(t.training_days) ? t.training_days.map(Number) : [],
     warmups: warmups.filter((w) => w.team_id === t.id).map((w) => w.date).sort(),
     players: players.filter((p) => p.team_id === t.id).map((p) => ({
       id: p.id,

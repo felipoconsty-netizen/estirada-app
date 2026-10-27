@@ -6,6 +6,7 @@ import * as db from '@/lib/db'
 import { fmt } from '@/lib/derive'
 import { DICT, zone, type Dict } from '@/lib/i18n'
 import { ageAt, type Lang, type Sex } from '@/lib/phv'
+import { DAY_SHORT, daysText, WEEK } from '@/lib/schedule'
 import { configured, supabase } from '@/lib/supabase'
 import { InstallButton } from '@/components/Install'
 import { normName, readTables, sheetsToPlayers, type ImportRow } from '@/lib/importer'
@@ -248,7 +249,7 @@ const emptyPlayer: db.PlayerInput = { name: '', sex: 'F', dob: '', father: null,
 
 function Manage({ t, lang, teams: all, profile, toast, reload, guest, staff, email }: { t: Dict; lang: Lang; teams: Team[]; profile: db.Profile; toast: (s: string) => void; reload: () => Promise<void>; guest: boolean; staff: db.Staff[]; email: string }) {
   const teams = all.filter((x) => x.role !== 'fisio')
-  const [editTeam, setEditTeam] = useState<{ id?: string; name: string; coach: string } | null>(null)
+  const [editTeam, setEditTeam] = useState<(db.TeamInput & { id?: string }) | null>(null)
   const [editPlayer, setEditPlayer] = useState<{ teamId: string; id?: string; v: db.PlayerInput } | null>(null)
   const [importTo, setImportTo] = useState<Team | null>(null)
   const act = async (fn: () => Promise<void>, ok = t.done) => {
@@ -265,13 +266,7 @@ function Manage({ t, lang, teams: all, profile, toast, reload, guest, staff, ema
 
       {!guest && <StaffSection t={t} teams={teams.filter((x) => x.role === 'owner')} club={profile.club_name} staff={staff.filter((s) => s.email !== email)} email={email} act={act} toast={toast} />}
 
-      {editTeam && (
-        <form className="card p-5 grid gap-3 sm:grid-cols-[1fr_1fr_auto] items-end" onSubmit={(e) => { e.preventDefault(); const v = { name: editTeam.name.trim(), coach: editTeam.coach.trim() }; act(() => (editTeam.id ? db.updateTeam(editTeam.id, v) : db.createTeam(v))); setEditTeam(null) }}>
-          <label className="field"><span className="text-[13px] font-medium">{t.team_name}</span><input required autoFocus value={editTeam.name} onChange={(e) => setEditTeam({ ...editTeam, name: e.target.value })} /></label>
-          <label className="field"><span className="text-[13px] font-medium">{t.coach_label}</span><input value={editTeam.coach} onChange={(e) => setEditTeam({ ...editTeam, coach: e.target.value })} /></label>
-          <div className="flex gap-2"><button className="btn" type="submit">{t.save_btn}</button><button className="btn-ghost" type="button" onClick={() => setEditTeam(null)}>{t.cancel}</button></div>
-        </form>
-      )}
+      {editTeam && !editTeam.id && <TeamForm t={t} lang={lang} value={editTeam} onChange={setEditTeam} onCancel={() => setEditTeam(null)} onSave={(v) => { setEditTeam(null); act(() => db.createTeam(v)) }} />}
 
       {teams.length === 0 && !editTeam && <p className="muted">{t.no_teams}</p>}
       {importTo && <ImportSheet t={t} team={importTo} today={today} onClose={() => setImportTo(null)} onImport={async (rows) => { setImportTo(null); await act(() => db.importPlayers(importTo.id, rows), t.import_done) }} />}
@@ -279,15 +274,19 @@ function Manage({ t, lang, teams: all, profile, toast, reload, guest, staff, ema
       {teams.map((tm) => (
         <section key={tm.id} className="card p-5 grid gap-4">
           <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <div className="grid gap-0.5"><h2 className="font-display text-[22px] font-bold">{tm.name}</h2><span className="text-[13px] muted">{tm.coach ? `${t.coach_label}: ${tm.coach} · ` : ''}{tm.players.length} {t.players.toLowerCase()}</span></div>
+            <div className="grid gap-0.5"><h2 className="font-display text-[22px] font-bold">{tm.name}</h2><span className="text-[13px] muted">{tm.coach ? `${t.coach_label}: ${tm.coach} · ` : ''}{tm.players.length} {t.players.toLowerCase()} · {tm.days?.length
+                ? <>{t.days_label}: {daysText(tm.days, lang)}</>
+                : <button className="underline" style={{ color: 'var(--accent)' }} onClick={() => setEditTeam({ id: tm.id, name: tm.name, coach: tm.coach, days: [] })}>{t.days_missing}</button>}</span></div>
             <div className="flex flex-wrap gap-2">
               <button className="btn" onClick={() => setEditPlayer({ teamId: tm.id, v: { ...emptyPlayer } })}>+ {t.add_player}</button>
-              <button className="btn-ghost" onClick={() => setEditTeam({ id: tm.id, name: tm.name, coach: tm.coach })}>{t.edit}</button>
+              <button className="btn-ghost" onClick={() => setEditTeam({ id: tm.id, name: tm.name, coach: tm.coach, days: tm.days ?? [] })}>{t.edit}</button>
               <button className="btn-ghost" onClick={() => setImportTo(tm)}>{t.import_excel}</button>
               {tm.players.length > 0 && <button className="btn-ghost" onClick={() => downloadCsv(tm, t)}>{t.export_csv}</button>}
               {tm.role === 'owner' && <button className="btn-ghost tx-bad" onClick={() => confirm(t.confirm_delete_team) && act(() => db.deleteTeam(tm.id))}>{t.delete}</button>}
             </div>
           </div>
+
+          {editTeam?.id === tm.id && <TeamForm t={t} lang={lang} value={editTeam} onChange={setEditTeam} onCancel={() => setEditTeam(null)} onSave={(v) => { setEditTeam(null); act(() => db.updateTeam(tm.id, v)) }} />}
 
           {editPlayer?.teamId === tm.id && (
             <PlayerForm t={t} today={today} value={editPlayer.v} onCancel={() => setEditPlayer(null)}
@@ -320,6 +319,28 @@ function Manage({ t, lang, teams: all, profile, toast, reload, guest, staff, ema
       ))}
 
     </div>
+  )
+}
+
+/** Nom, entrenador/a i dies d'entreno d'un equip. */
+function TeamForm({ t, lang, value, onChange, onSave, onCancel }: { t: Dict; lang: Lang; value: db.TeamInput & { id?: string }; onChange: (v: db.TeamInput & { id?: string }) => void; onSave: (v: db.TeamInput) => void; onCancel: () => void }) {
+  const days = value.days ?? []
+  const toggle = (d: number) => onChange({ ...value, days: days.includes(d) ? days.filter((x) => x !== d) : [...days, d].sort() })
+  return (
+    <form className="card p-5 grid gap-4" onSubmit={(e) => { e.preventDefault(); onSave({ name: value.name.trim(), coach: value.coach.trim(), days }) }}>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="field"><span className="text-[13px] font-medium">{t.team_name}</span><input required autoFocus={!value.id} value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} /></label>
+        <label className="field"><span className="text-[13px] font-medium">{t.coach_label}</span><input value={value.coach} onChange={(e) => onChange({ ...value, coach: e.target.value })} /></label>
+      </div>
+      <fieldset className="grid gap-2">
+        <legend className="text-[13px] font-medium mb-2">{t.days_q}</legend>
+        <div className="flex flex-wrap gap-1.5">
+          {WEEK.map((d) => <button key={d} type="button" className="pill text-[14px] min-w-[44px] justify-center" aria-pressed={days.includes(d)} onClick={() => toggle(d)}>{DAY_SHORT[lang][d - 1]}</button>)}
+        </div>
+        <span className="text-[12.5px] muted">{days.length ? `${daysText(days, lang)}. ` : ''}{t.days_help}</span>
+      </fieldset>
+      <div className="flex gap-2"><button className="btn" type="submit">{t.save_btn}</button><button className="btn-ghost" type="button" onClick={onCancel}>{t.cancel}</button></div>
+    </form>
   )
 }
 

@@ -1,5 +1,6 @@
 // Escalfament de prevenció (15 minuts), basat en l'estructura de FIFA 11+ i PEP adaptada al bàsquet.
 // El que protegeix és fer-lo sovint: el grup que el fa més de la meitat de les sessions té fins a un 88% menys de lesions de creuat.
+import { pastSessions } from './schedule'
 import type { Lang } from './phv'
 import { daysBetween } from './load'
 
@@ -50,6 +51,13 @@ export const videoUrl = (q: string) => `https://www.youtube.com/results?search_q
 export const WARMUP_GOAL = 2
 
 /** Escalfaments de cada bloc de 7 dies (de més antic a avui) i la mitjana setmanal de les últimes 4 setmanes. */
+/** En quants dels entrenos de les últimes 4 setmanes s'ha fet l'escalfament. Null sense dies d'entreno. */
+export function sessionsDone(dates: string[], days: number[] | undefined, today: string) {
+  if (!days?.length) return null
+  const ses = pastSessions(days, today)
+  return { n: ses.filter((d) => dates.includes(d)).length, m: ses.length }
+}
+
 export function warmupStats(dates: string[], today: string, n = 4) {
   const weeks = Array.from({ length: n }, (_, i) => {
     const from = (n - 1 - i) * 7
@@ -61,11 +69,12 @@ export function warmupStats(dates: string[], today: string, n = 4) {
 }
 
 /** Línia del resum de dilluns sobre l'escalfament. Null si encara no se n'ha apuntat cap. */
-export function warmupLine(dates: string[] | undefined, today: string, lang: Lang): { level: 'ok' | 'warn' | 'bad'; text: string } | null {
+export function warmupLine(dates: string[] | undefined, today: string, lang: Lang, days?: number[]): { level: 'ok' | 'warn' | 'bad'; text: string } | null {
   if (!dates?.length) return null
   const s = warmupStats(dates, today)
   const es = lang === 'es'
-  const avg = s.avg.toLocaleString('es-ES', { maximumFractionDigits: 1 })
+  const ses = sessionsDone(dates, days, today)
+  const avg = s.avg.toLocaleString('es-ES', { maximumFractionDigits: 1 }) + (ses ? ` (${ses.n} ${es ? 'de' : 'de'} ${ses.m} entrenos)` : '')
   if (s.level === 'ok') return { level: 'ok', text: es ? `Calentamiento de prevención: ${avg} por semana de media. Buen ritmo, es lo que protege.` : `Escalfament de prevenció: ${avg} per setmana de mitjana. Bon ritme, és el que protegeix.` }
   return { level: 'warn', text: es
     ? `Calentamiento de prevención: solo ${avg} por semana de media. Para que proteja hacen falta ${WARMUP_GOAL} o más.`

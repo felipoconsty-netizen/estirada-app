@@ -22,7 +22,7 @@ export function weeklyEmail(teams: Team[], coach: string, appUrl: string, today:
     const notes = conclusions(team.players, weeks, week, 'ca').filter((c) => c.level === 'bad' || c.level === 'warn').slice(0, 8)
     const answered = team.players.filter((p) => p.wellness.some((w) => w.week === week)).length
     const sessions = team.players.reduce((a, p) => a + loadView(p.loads, today).sessions, 0)
-    const wl = warmupLine(team.warmups, today, 'ca')
+    const wl = warmupLine(team.warmups, today, 'ca', team.days)
     blocks.push({ team, summary: [...mondaySummary(views, 'ca'), ...(wl ? [wl] : [])], notes, answered, sessions })
   }
   if (!blocks.length) return null

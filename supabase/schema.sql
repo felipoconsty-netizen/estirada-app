@@ -211,3 +211,6 @@ drop policy if exists own on warmups;
 create policy own on warmups for all using (owner = auth.uid())
   with check (owner = auth.uid() and exists (select 1 from teams t where t.id = team_id and t.owner = auth.uid()));
 grant select, insert, update, delete on warmups to authenticated;
+-- Dies d'entreno de cada equip: 1 = dilluns … 7 = diumenge.
+alter table teams add column if not exists training_days smallint[] not null default '{}'
+  check (training_days <@ array[1,2,3,4,5,6,7]::smallint[]);
