@@ -263,6 +263,8 @@ function Manage({ t, lang, teams: all, profile, toast, reload, guest, staff, ema
         {!guest && <button className="btn" onClick={() => setEditTeam({ name: '', coach: profile.coach_name })}>+ {t.add_team}</button>}
       </div>
 
+      {!guest && <StaffSection t={t} teams={teams.filter((x) => x.role === 'owner')} club={profile.club_name} staff={staff.filter((s) => s.email !== email)} email={email} act={act} toast={toast} />}
+
       {editTeam && (
         <form className="card p-5 grid gap-3 sm:grid-cols-[1fr_1fr_auto] items-end" onSubmit={(e) => { e.preventDefault(); const v = { name: editTeam.name.trim(), coach: editTeam.coach.trim() }; act(() => (editTeam.id ? db.updateTeam(editTeam.id, v) : db.createTeam(v))); setEditTeam(null) }}>
           <label className="field"><span className="text-[13px] font-medium">{t.team_name}</span><input required autoFocus value={editTeam.name} onChange={(e) => setEditTeam({ ...editTeam, name: e.target.value })} /></label>
@@ -317,7 +319,6 @@ function Manage({ t, lang, teams: all, profile, toast, reload, guest, staff, ema
         </section>
       ))}
 
-      {!guest && <StaffSection t={t} teams={teams.filter((x) => x.role === 'owner')} club={profile.club_name} staff={staff.filter((s) => s.email !== email)} email={email} act={act} toast={toast} />}
     </div>
   )
 }
