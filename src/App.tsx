@@ -3,13 +3,14 @@ import { WEEKS, type Injury, type Load, type Player, type Team } from '@/lib/dat
 import { derive, deriveTeam, firstName, fmt, mondaySummary, phaseNow, signed, wellnessScore, type Level, type PlayerView } from '@/lib/derive'
 import { DICT, zone, type Dict } from '@/lib/i18n'
 import { ageAt, birthQuarter, FAST_GROWTH, growthVelocity, maturityOffset, PAH_BANDS, phaseOf, RECOS, type Lang, type Measure } from '@/lib/phv'
+import { ORDER_LABEL, ORDER_LEVEL, ORDERS, todayPlan } from '@/lib/today'
 import { PARTS, PROGRAM, videoUrl, warmupLine, warmupStats, WARMUP_GOAL, type Part } from '@/lib/warmup'
 import { answerOf, conclusions, DIMS, mondayLabel, surveyWeeks } from '@/lib/survey'
 import { loadAlert, loadView, weeklyLabels, weeklyLoads } from '@/lib/load'
 import { InstallButton } from '@/components/Install'
 import { GrowthChart, MaturityMap, OffsetGauge, Sparkline, WeekBars, WellnessChart } from '@/components/Charts'
 
-type Tab = 'team' | 'player' | 'measure' | 'survey' | 'load' | 'warmup' | 'family' | 'club' | 'manage'
+type Tab = 'today' | 'team' | 'player' | 'measure' | 'survey' | 'load' | 'warmup' | 'family' | 'club' | 'manage'
 
 export function Chip({ level, children }: { level: Level; children: React.ReactNode }) {
   return <span className={`chip lv-${level}`}><span className="dot" />{children}</span>
@@ -80,7 +81,7 @@ export function Brand({ sub }: { sub?: string }) {
 }
 
 export default function Workspace({ demo, teams: initial, club, today, actions, manage, account, banner, lang, setLang }: WorkspaceProps & { lang: Lang; setLang: (l: Lang) => void }) {
-  const [tab, setTab] = useState<Tab>(initial.length ? 'team' : 'manage')
+  const [tab, setTab] = useState<Tab>(initial.length ? 'today' : 'manage')
   const [teams, setTeams] = useState(initial)
   const [teamId, setTeamId] = useState(initial[0]?.id ?? '')
   const [playerId, setPlayerId] = useState(initial[0]?.players[0]?.id ?? '')
@@ -94,6 +95,8 @@ export default function Workspace({ demo, teams: initial, club, today, actions, 
   const views = useMemo(() => (team ? deriveTeam(team, lang, today) : []), [team, lang, today])
   const player = team?.players.find((p) => p.id === playerId) ?? team?.players[0]
 
+  useEffect(() => { if (team?.role === 'fisio' && (tab === 'measure' || tab === 'load')) setTab('today') }, [team, tab])
+
   const updatePlayer = (id: string, fn: (p: Player) => Player) =>
     setTeams((ts) => ts.map((tm) => ({ ...tm, players: tm.players.map((p) => (p.id === id ? fn(p) : p)) })))
   const run = async (fn: () => Promise<void>, ok?: string) => {
@@ -101,12 +104,15 @@ export default function Workspace({ demo, teams: initial, club, today, actions, 
   }
 
   const openPlayer = (id: string) => { setPlayerId(id); setTab('player'); window.scrollTo({ top: 0 }) }
-  const openMeasure = (id: string) => { setPlayerId(id); setTab('measure'); window.scrollTo({ top: 0 }) }
+  const openMeasure = (id: string) => { setPlayerId(id); setTab(team?.role === 'fisio' ? 'player' : 'measure'); window.scrollTo({ top: 0 }) }
   const pickTeam = (id: string) => { setTeamId(id); setPlayerId(teams.find((x) => x.id === id)?.players[0]?.id ?? '') }
 
-  const tabs: [Tab, string][] = [['team', t.nav_team], ['player', t.nav_player], ['measure', t.nav_measure], ['survey', t.nav_survey], ['load', t.nav_load], ['warmup', t.nav_warmup], ['family', t.nav_family], ['club', t.nav_club]]
+  // El fisio només consulta i apunta lesions: sense mesurar, càrrega ni escalfament.
+  const readOnly = team?.role === 'fisio'
+  const tabs = ([['today', t.nav_today], ['team', t.nav_team], ['player', t.nav_player], ['measure', t.nav_measure], ['survey', t.nav_survey], ['load', t.nav_load], ['warmup', t.nav_warmup], ['family', t.nav_family], ['club', t.nav_club]] as [Tab, string][])
+    .filter(([k]) => !readOnly || (k !== 'measure' && k !== 'load'))
   if (manage) tabs.push(['manage', t.nav_manage])
-  const needsPlayers = tab !== 'manage' && tab !== 'club' && tab !== 'team'
+  const needsPlayers = tab !== 'manage' && tab !== 'club' && tab !== 'team' && tab !== 'today'
 
   return (
     <div className="min-h-full">
@@ -136,7 +142,7 @@ export default function Workspace({ demo, teams: initial, club, today, actions, 
             {tab === 'team' && <TeamView t={t} lang={lang} demo={demo} today={today} teams={teams} team={team} views={views} pickTeam={pickTeam} openPlayer={openPlayer} openMeasure={openMeasure} goManage={manage ? () => setTab('manage') : undefined} />}
             {tab === 'player' && player && <PlayerScreen t={t} lang={lang} today={today} team={team} player={player} setPlayerId={setPlayerId} goFamily={() => setTab('family')} goMeasure={() => openMeasure(player.id)}
               onAddInjury={(i) => (demo ? updatePlayer(player.id, (p) => ({ ...p, injuries: [i, ...p.injuries] })) : run(() => actions!.addInjury(player.id, i), t.done))}
-              onDeleteMeasure={(date) => {
+              onDeleteMeasure={readOnly ? undefined : (date) => {
                 updatePlayer(player.id, (p) => ({ ...p, measures: p.measures.filter((x) => x.date !== date) }))
                 if (!demo) run(() => actions!.deleteMeasure(player.id, date), t.done)
               }}
@@ -154,8 +160,9 @@ export default function Workspace({ demo, teams: initial, club, today, actions, 
                 for (const r of rows) updatePlayer(r.playerId, (p) => ({ ...p, loads: [...p.loads.filter((l) => l.date !== r.load.date || l.kind !== r.load.kind), r.load] }))
                 if (demo) setToast(t.load_saved); else run(() => actions!.saveLoads(rows), t.load_saved)
               }} />}
+            {tab === 'today' && <TodayScreen t={t} lang={lang} today={today} teams={teams} team={team} views={views} pickTeam={pickTeam} openPlayer={openPlayer} goWarmup={() => setTab('warmup')} />}
             {tab === 'warmup' && <WarmupScreen t={t} lang={lang} today={today} team={team} views={views}
-              onToggle={(date, done) => {
+              onToggle={readOnly ? undefined : (date, done) => {
                 setTeams((ts) => ts.map((tm) => (tm.id === team.id ? { ...tm, warmups: done ? [...new Set([...(tm.warmups ?? []), date])].sort() : (tm.warmups ?? []).filter((d) => d !== date) } : tm)))
                 const msg = done ? t.warmup_done : t.warmup_removed
                 if (demo) setToast(msg); else run(() => actions!.setWarmup(team.id, date, done), msg)
@@ -176,6 +183,81 @@ function Empty({ t, text, action }: { t: Dict; text: string; action?: () => void
     <div className="card p-8 grid gap-4 justify-items-start max-w-[560px]">
       <p className="text-[16px]">{text}</p>
       {action && <button className="btn" onClick={action}>{t.nav_manage} →</button>}
+    </div>
+  )
+}
+
+/* ───────────── Avui ───────────── */
+
+function TodayScreen({ t, lang, today, teams, team, views, pickTeam, openPlayer, goWarmup }: { t: Dict; lang: Lang; today: string; teams: Team[]; team: Team; views: PlayerView[]; pickTeam: (id: string) => void; openPlayer: (id: string) => void; goWarmup: () => void }) {
+  const plan = useMemo(() => todayPlan(views, lang), [views, lang])
+  const unmeasured = team.players.filter((p) => !p.measures.length)
+  const warmed = (team.warmups ?? []).includes(today)
+  const careful = plan.filter((r) => r.order === 'stop' || r.order === 'less').map((r) => firstName(r.v.p.name))
+  const date = new Date(today + 'T12:00:00').toLocaleDateString(lang === 'es' ? 'es-ES' : 'ca-ES', { weekday: 'long', day: 'numeric', month: 'long' })
+  return (
+    <div className="grid gap-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="grid gap-1">
+          <div className="label">{team.name} · {date}</div>
+          <h1 className="font-display text-[34px] md:text-[40px] font-bold leading-none">{t.today_title}</h1>
+          <p className="muted max-w-[680px]">{t.today_sub}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 no-print">
+          <TeamPicker teams={teams} team={team} pickTeam={pickTeam} />
+          <button className="btn-ghost" onClick={() => window.print()}>{t.today_print}</button>
+        </div>
+      </div>
+
+      {team.players.length === 0 ? <Empty t={t} text={t.no_players} /> : <>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {ORDERS.map((o) => {
+            const n = plan.filter((r) => r.order === o).length
+            return (
+              <div key={o} className="card p-4 grid gap-1">
+                <div className={`font-display text-[30px] font-bold leading-none num ${n && o !== 'normal' ? `tx-${ORDER_LEVEL[o] === 'info' ? 'warn' : ORDER_LEVEL[o]}` : ''}`}>{n}</div>
+                <div className="text-[13px] muted leading-snug">{ORDER_LABEL[lang][o]}</div>
+              </div>
+            )
+          })}
+        </div>
+
+        <button className="card p-4 flex flex-wrap items-center justify-between gap-3 text-left no-print" onClick={goWarmup}>
+          <span className="font-medium">{t.today_warmup}{careful.length > 0 && <span className="muted font-normal"> · {t.warmup_peak.replace('{names}', careful.join(', '))}</span>}</span>
+          {warmed ? <Chip level="ok">{t.warmup_done}</Chip> : <span className="text-[13px]" style={{ color: 'var(--accent)' }}>{t.warmup_mark} →</span>}
+        </button>
+
+        <div className="grid gap-4 print-area">
+          {ORDERS.map((o) => {
+            const rows = plan.filter((r) => r.order === o)
+            if (!rows.length) return null
+            return (
+              <section key={o} className="card p-5 grid gap-3">
+                <div className="grid gap-1">
+                  <div className="flex items-center gap-2"><Chip level={ORDER_LEVEL[o]}>{ORDER_LABEL[lang][o]}</Chip><span className="text-[13px] muted">{rows.length} {t.today_counts}</span></div>
+                  <p className="text-[14px] muted">{t.order_help[o]}</p>
+                </div>
+                <ul className="grid gap-1.5">
+                  {rows.map((r) => (
+                    <li key={r.v.p.id}>
+                      <button className="w-full grid gap-0.5 sm:grid-cols-[220px_1fr] items-baseline text-left py-1.5 line-t" onClick={() => openPlayer(r.v.p.id)}>
+                        <span className="font-medium flex items-center gap-2">{r.v.p.name}{r.talk && <span className="chip lv-warn text-[11.5px]"><span className="dot" />{t.talk_chip}</span>}</span>
+                        <span className="text-[13.5px] muted">{r.reasons.length ? r.reasons.join(' · ') : r.v.phase.label[lang]}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )
+          })}
+          {unmeasured.length > 0 && (
+            <section className="card p-5 grid gap-2">
+              <span className="text-[14px] muted">{t.today_unmeasured}</span>
+              <p className="text-[14px]">{unmeasured.map((p) => p.name).join(', ')}</p>
+            </section>
+          )}
+        </div>
+      </>}
     </div>
   )
 }
@@ -330,7 +412,7 @@ function PlayerSelect({ t, team, player, setPlayerId }: { t: Dict; team: Team; p
   )
 }
 
-function PlayerScreen({ t, lang, today, team, player, setPlayerId, goFamily, goMeasure, onAddInjury, onInjuryStatus, onDeleteMeasure }: { t: Dict; lang: Lang; today: string; team: Team; player: Player; setPlayerId: (id: string) => void; goFamily: () => void; goMeasure: () => void; onAddInjury: (i: Injury) => void; onInjuryStatus: (i: Injury, s: Injury['status']) => void; onDeleteMeasure: (date: string) => void }) {
+function PlayerScreen({ t, lang, today, team, player, setPlayerId, goFamily, goMeasure, onAddInjury, onInjuryStatus, onDeleteMeasure }: { t: Dict; lang: Lang; today: string; team: Team; player: Player; setPlayerId: (id: string) => void; goFamily: () => void; goMeasure: () => void; onAddInjury: (i: Injury) => void; onInjuryStatus: (i: Injury, s: Injury['status']) => void; onDeleteMeasure?: (date: string) => void }) {
   const v = derive(player, lang, today)
   if (!v) return (
     <div className="grid gap-6">
@@ -448,7 +530,7 @@ function PlayerScreen({ t, lang, today, team, player, setPlayerId, goFamily, goM
                     <td className="num font-mono text-[13px]">{fmt(m.sitting)}</td>
                     <td className="num font-mono text-[13px]">{fmt(m.mass)}</td>
                     <td className="num font-mono text-[13px]">{signed(o)}</td>
-                    <td className="text-right"><button className="text-[13px] underline tx-bad" onClick={() => confirm(t.delete_measure_q) && onDeleteMeasure(m.date)}>{t.delete}</button></td>
+                    <td className="text-right">{onDeleteMeasure && <button className="text-[13px] underline tx-bad" onClick={() => confirm(t.delete_measure_q) && onDeleteMeasure(m.date)}>{t.delete}</button>}</td>
                   </tr>
                 )
               })}
@@ -862,7 +944,7 @@ function LoadScreen({ t, lang, demo, today, team, openPlayer, toast, onSave }: {
 
 /* ───────────── Escalfament ───────────── */
 
-function WarmupScreen({ t, lang, today, team, views, onToggle }: { t: Dict; lang: Lang; today: string; team: Team; views: PlayerView[]; onToggle: (date: string, done: boolean) => void }) {
+function WarmupScreen({ t, lang, today, team, views, onToggle }: { t: Dict; lang: Lang; today: string; team: Team; views: PlayerView[]; onToggle?: (date: string, done: boolean) => void }) {
   const [date, setDate] = useState(today)
   const [level, setLevel] = useState(0)
   const dates = team.warmups ?? []
@@ -885,8 +967,8 @@ function WarmupScreen({ t, lang, today, team, views, onToggle }: { t: Dict; lang
           <div className="flex flex-wrap items-end gap-3">
             <label className="field"><span className="text-[13px] font-medium">{t.warmup_day}</span><input type="date" value={date} max={today} onChange={(e) => setDate(e.target.value)} /></label>
             {done
-              ? <><Chip level="ok">{t.warmup_done}</Chip><button className="btn-ghost" onClick={() => onToggle(date, false)}>{t.warmup_unmark}</button></>
-              : <button className="btn" onClick={() => onToggle(date, true)}>✓ {t.warmup_mark}</button>}
+              ? <><Chip level="ok">{t.warmup_done}</Chip>{onToggle && <button className="btn-ghost" onClick={() => onToggle(date, false)}>{t.warmup_unmark}</button>}</>
+              : onToggle ? <button className="btn" onClick={() => onToggle(date, true)}>✓ {t.warmup_mark}</button> : <Chip level="info">{t.warmup_not_done}</Chip>}
           </div>
         </section>
         <section className="card p-5 grid gap-3 content-start">

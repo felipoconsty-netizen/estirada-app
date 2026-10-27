@@ -1,10 +1,13 @@
-import type { Injury, Load, Team, Wellness } from './data'
+import type { Injury, Load, Role, Team, Wellness } from './data'
 import { assembleTeams } from './rows'
 import type { Measure, Sex } from './phv'
 import { supabase } from './supabase'
 
 export interface Profile { club_name: string; town: string; coach_name: string; weekly_email?: boolean }
-export interface DbTeam extends Team { survey_token: string }
+export interface DbTeam extends Team { survey_token: string; owner: string }
+export interface Staff { id: string; owner: string; email: string; role: Exclude<Role, 'owner'>; team_id: string | null }
+
+const RANK: Record<Role, number> = { owner: 0, director: 1, entrenador: 2, fisio: 3 }
 export interface PlayerInput { name: string; sex: Sex; dob: string; father: number | null; mother: number | null }
 
 const sb = () => {
@@ -44,7 +47,33 @@ export async function loadTeams(): Promise<DbTeam[]> {
     sb().from('warmups').select('*').gte('date', since).order('date').then(tolerant),
   ]).then((rs) => rs.map(check) as Record<string, unknown>[][])
 
-  return assembleTeams({ teams, players, measures, wellness, injuries, loads, warmups })
+  const [{ data: u }, staff] = await Promise.all([sb().auth.getUser(), loadStaff()])
+  const me = u.user?.id, email = (u.user?.email ?? '').toLowerCase()
+  return assembleTeams({ teams, players, measures, wellness, injuries, loads, warmups }).map((t) => ({ ...t, role: roleIn(t, me, email, staff) }))
+}
+
+/** El meu rol en un equip: titular, o el rol més alt que m'hagi donat el titular. */
+function roleIn(t: { id: string; owner: string }, me: string | undefined, email: string, staff: Staff[]): Role {
+  if (t.owner === me) return 'owner'
+  const mine = staff.filter((s) => s.owner === t.owner && s.email === email && (s.team_id === null || s.team_id === t.id)).map((s) => s.role)
+  return mine.sort((a, b) => RANK[a] - RANK[b])[0] ?? 'fisio'
+}
+
+/** Persones a qui he donat accés, i els accessos que m'han donat a mi. Si la taula encara no existeix, cap. */
+export async function loadStaff(): Promise<Staff[]> {
+  const r = await sb().from('staff').select('id, owner, email, role, team_id').order('created_at')
+  return r.error ? [] : (r.data as Staff[])
+}
+export async function addStaff(s: { email: string; role: Staff['role']; team_id: string | null }) {
+  check(await sb().from('staff').insert({ ...s, email: s.email.trim().toLowerCase() }))
+}
+export async function removeStaff(id: string) {
+  check(await sb().from('staff').delete().eq('id', id))
+}
+/** Perfil del club del titular (per a l'equip tècnic, que no en té de propi). */
+export async function loadClub(owner: string): Promise<Profile | null> {
+  const r = check(await sb().from('profiles').select('club_name, town, coach_name').eq('id', owner).maybeSingle()) as Profile | null
+  return r
 }
 
 export async function createTeam(t: { name: string; coach: string }) {

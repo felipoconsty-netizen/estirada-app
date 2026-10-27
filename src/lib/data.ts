@@ -54,7 +54,10 @@ export interface Team {
   coach: string
   players: Player[]
   warmups?: string[] // dies (ISO) en què s'ha fet l'escalfament de prevenció
+  role?: Role // el meu rol en aquest equip (només a l'app real)
 }
+
+export type Role = 'owner' | 'director' | 'entrenador' | 'fisio'
 
 // Generador pseudoaleatori estable perquè la demo surti sempre igual.
 function rng(seed: number) {
