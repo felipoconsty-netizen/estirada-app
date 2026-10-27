@@ -175,3 +175,39 @@ grant execute on function submit_load(uuid, uuid, date, text, int, int) to anon,
 
 -- Resum de dilluns per correu (es pot desactivar al perfil).
 alter table profiles add column if not exists weekly_email boolean not null default true;
+
+-- Hores de son al qüestionari setmanal.
+alter table wellness add column if not exists sleep_hours numeric(3,1) check (sleep_hours between 3 and 14);
+drop function if exists submit_survey(uuid, uuid, int, int, int, int, int, text, int, text, boolean, text);
+create or replace function submit_survey(token uuid, player uuid, energy int, sleep int, legs int, stress int, mood int,
+  pain_zone text, pain_level int, pain_side text, pain_stopped boolean, comment text, sleep_hours numeric default null)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare o uuid; wk date := date_trunc('week', (now() at time zone 'Europe/Madrid') - interval '6 days')::date; -- setmana del diumenge més recent
+begin
+  select p.owner into o from players p join teams t on t.id = p.team_id where p.id = player and t.survey_token = token;
+  if o is null then return false; end if;
+  insert into wellness (owner, player_id, week, energy, sleep, legs, stress, mood, pain_zone, pain_level, pain_side, pain_stopped, comment, sleep_hours)
+  values (o, player, wk, energy, sleep, legs, stress, mood, pain_zone, pain_level, pain_side, pain_stopped, left(nullif(trim(comment), ''), 500),
+    case when sleep_hours between 3 and 14 then sleep_hours end)
+  on conflict (player_id, week) do update set energy = excluded.energy, sleep = excluded.sleep, legs = excluded.legs,
+    stress = excluded.stress, mood = excluded.mood, pain_zone = excluded.pain_zone, pain_level = excluded.pain_level,
+    pain_side = excluded.pain_side, pain_stopped = excluded.pain_stopped, comment = excluded.comment, sleep_hours = excluded.sleep_hours, created_at = now();
+  return true;
+end $$;
+revoke all on function submit_survey(uuid, uuid, int, int, int, int, int, text, int, text, boolean, text, numeric) from public;
+grant execute on function submit_survey(uuid, uuid, int, int, int, int, int, text, int, text, boolean, text, numeric) to anon, authenticated;
+
+-- Escalfament de prevenció: un registre per equip i dia en què s'ha fet.
+create table if not exists warmups (
+  id uuid primary key default gen_random_uuid(),
+  owner uuid not null default auth.uid() references auth.users on delete cascade,
+  team_id uuid not null references teams on delete cascade,
+  date date not null,
+  created_at timestamptz not null default now(),
+  unique (team_id, date)
+);
+alter table warmups enable row level security;
+drop policy if exists own on warmups;
+create policy own on warmups for all using (owner = auth.uid())
+  with check (owner = auth.uid() and exists (select 1 from teams t where t.id = team_id and t.owner = auth.uid()));
+grant select, insert, update, delete on warmups to authenticated;

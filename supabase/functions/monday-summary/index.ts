@@ -24,15 +24,16 @@ Deno.serve(async (req) => {
   for (const pr of profiles as { id: string; coach_name: string }[]) {
     try {
       const owner = pr.id
-      const [teams, players, measures, wellness, injuries, loads] = await Promise.all([
+      const [teams, players, measures, wellness, injuries, loads, warmups] = await Promise.all([
         sb.from('teams').select('*').eq('owner', owner).order('created_at'),
         sb.from('players').select('*').eq('owner', owner).order('name'),
         sb.from('measures').select('*').eq('owner', owner).order('date'),
         sb.from('wellness').select('*').eq('owner', owner).gte('week', since(70)).order('week'),
         sb.from('injuries').select('*').eq('owner', owner).order('date', { ascending: false }),
         sb.from('loads').select('*').eq('owner', owner).gte('date', since(70)).order('date'),
+        sb.from('warmups').select('*').eq('owner', owner).gte('date', since(70)).order('date').then((r) => (r.error ? { data: [], error: null } : r)),
       ]).then((rs) => rs.map(rows) as Record<string, unknown>[][])
-      const mail = weeklyEmail(assembleTeams({ teams, players, measures, wellness, injuries, loads }), pr.coach_name, appUrl(), today)
+      const mail = weeklyEmail(assembleTeams({ teams, players, measures, wellness, injuries, loads, warmups }), pr.coach_name, appUrl(), today)
       if (!mail) { out.push({ owner, status: 'no players' }); continue }
       const { data: u } = await sb.auth.admin.getUserById(owner)
       const to = u.user?.email

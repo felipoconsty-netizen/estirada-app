@@ -28,10 +28,10 @@ export function loadView(loads: Load[], today: string): LoadView {
 
 export const growing = (k: PhaseKey) => k === 'entrant' || k === 'plena'
 
-/** Avís quan la càrrega de la setmana puja de cop. A prop del pic de creixement el llindar és més baix. */
-export function loadAlert(v: LoadView, phase: PhaseKey, lang: Lang): { level: 'warn' | 'bad'; text: string } | null {
+/** Avís quan la càrrega de la setmana puja de cop. A prop del pic, o si creix ràpid, el llindar és més baix. */
+export function loadAlert(v: LoadView, phase: PhaseKey, lang: Lang, fast = false): { level: 'warn' | 'bad'; text: string } | null {
   if (v.ratio === null) return null
-  const g = growing(phase)
+  const g = growing(phase) || fast
   if (v.ratio < (g ? 1.3 : 1.5)) return null
   const es = lang === 'es'
   const x = v.ratio.toLocaleString('es-ES', { maximumFractionDigits: 1 })

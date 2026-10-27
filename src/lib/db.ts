@@ -31,17 +31,20 @@ export async function saveProfile(p: Profile) {
 }
 
 export async function loadTeams(): Promise<DbTeam[]> {
-  const [teams, players, measures, wellness, injuries, loads] = await Promise.all([
+  const since = new Date(Date.now() - 70 * 864e5).toISOString().slice(0, 10)
+  const tolerant = <T extends { error: unknown }>(r: T) => (r.error ? { data: [], error: null } : r)
+  const [teams, players, measures, wellness, injuries, loads, warmups] = await Promise.all([
     sb().from('teams').select('*').order('created_at'),
     sb().from('players').select('*').order('name'),
     sb().from('measures').select('*').order('date'),
     sb().from('wellness').select('*').order('week'),
     sb().from('injuries').select('*').order('date', { ascending: false }),
     // Si la taula de càrrega encara no existeix, l'app continua funcionant sense.
-    sb().from('loads').select('*').gte('date', new Date(Date.now() - 70 * 864e5).toISOString().slice(0, 10)).order('date').then((r) => (r.error ? { data: [], error: null } : r)),
+    sb().from('loads').select('*').gte('date', since).order('date').then(tolerant),
+    sb().from('warmups').select('*').gte('date', since).order('date').then(tolerant),
   ]).then((rs) => rs.map(check) as Record<string, unknown>[][])
 
-  return assembleTeams({ teams, players, measures, wellness, injuries, loads })
+  return assembleTeams({ teams, players, measures, wellness, injuries, loads, warmups })
 }
 
 export async function createTeam(t: { name: string; coach: string }) {
@@ -86,6 +89,12 @@ export async function saveLoads(rows: { playerId: string; load: Load }[]) {
   check(await sb().from('loads').upsert(rows.map((r) => ({ player_id: r.playerId, date: r.load.date, kind: r.load.kind, minutes: r.load.minutes, rpe: r.load.rpe })), { onConflict: 'player_id,date,kind' }))
 }
 
+/** Marca o desmarca que l'equip ha fet l'escalfament de prevenció un dia. */
+export async function setWarmup(teamId: string, date: string, done: boolean) {
+  if (done) check(await sb().from('warmups').upsert({ team_id: teamId, date }, { onConflict: 'team_id,date' }))
+  else check(await sb().from('warmups').delete().eq('team_id', teamId).eq('date', date))
+}
+
 export async function submitLoad(token: string, player: string, l: Omit<Load, 'id'>) {
   const ok = check(await sb().rpc('submit_load', { token, player, day: l.date, kind: l.kind, minutes: l.minutes, rpe: l.rpe }))
   if (!ok) throw new Error('invalid')
@@ -96,11 +105,14 @@ export async function surveyTeam(token: string): Promise<SurveyTeam | null> {
   return check(await sb().rpc('survey_team', { token })) as SurveyTeam | null
 }
 export async function submitSurvey(token: string, player: string, w: Omit<Wellness, 'week'>) {
-  const ok = check(await sb().rpc('submit_survey', {
+  const args = {
     token, player, energy: w.energy, sleep: w.sleep, legs: w.legs, stress: w.stress, mood: w.mood,
     pain_zone: w.pain?.zone ?? null, pain_level: w.pain?.level ?? null, pain_side: w.pain?.side ?? null, pain_stopped: w.pain?.stopped ?? null,
     comment: w.comment ?? '',
-  }))
+  }
+  let r = await sb().rpc('submit_survey', { ...args, sleep_hours: w.sleepHours ?? null })
+  if (r.error) r = await sb().rpc('submit_survey', args) // base de dades encara sense hores de son
+  const ok = check(r)
   if (!ok) throw new Error('invalid')
 }
 
