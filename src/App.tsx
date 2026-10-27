@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { WEEKS, type Injury, type Player, type Team } from '@/lib/data'
-import { derive, deriveTeam, firstName, fmt, mondaySummary, signed, type Level, type PlayerView } from '@/lib/derive'
+import { derive, deriveTeam, firstName, fmt, mondaySummary, signed, wellnessScore, type Level, type PlayerView } from '@/lib/derive'
 import { DICT, zone, type Dict } from '@/lib/i18n'
 import { ageAt, growthVelocity, maturityOffset, phaseOf, RECOS, type Lang, type Measure } from '@/lib/phv'
+import { answerOf, conclusions, DIMS, surveyWeeks } from '@/lib/survey'
 import { InstallButton } from '@/components/Install'
 import { GrowthChart, MaturityMap, OffsetGauge, Sparkline, WellnessChart } from '@/components/Charts'
 
@@ -622,9 +623,15 @@ function SurveyView({ t, lang, team, onSend, openPlayer }: { t: Dict; lang: Lang
 
 function SurveyShare({ t, lang, today, team, openPlayer, toast, onNewLink }: { t: Dict; lang: Lang; today: string; team: Team & { survey_token?: string }; openPlayer: (id: string) => void; toast: (s: string) => void; onNewLink: () => void }) {
   const link = `${location.origin}/e/${team.survey_token}`
-  const week = mondayLabel(today)
-  const done = team.players.filter((p) => p.wellness.at(-1)?.week === week)
-  const missing = team.players.filter((p) => p.wellness.at(-1)?.week !== week)
+  const current = mondayLabel(today)
+  const weeks = useMemo(() => surveyWeeks(team.players, current), [team, current])
+  const [week, setWeek] = useState(current)
+  const done = team.players.filter((p) => answerOf(p, week))
+  const missing = team.players.filter((p) => !answerOf(p, week))
+  const notes = useMemo(() => conclusions(team.players, weeks, week, lang), [team, weeks, week, lang])
+  const rows = done.map((p) => ({ p, w: answerOf(p, week)! })).sort((a, b) => wellnessScore(a.w) - wellnessScore(b.w))
+  const dimLabel = { energy: t.energy, sleep: t.sleep, legs: t.legs, stress: t.stress, mood: t.mood }
+  const cell = (n: number) => (n <= 2 ? 'lv-bad' : n === 3 ? 'lv-warn' : '')
   const copy = async () => { try { await navigator.clipboard.writeText(link); toast(t.copied) } catch { toast(link) } }
   return (
     <div className="grid gap-6">
@@ -646,7 +653,7 @@ function SurveyShare({ t, lang, today, team, openPlayer, toast, onNewLink }: { t
           <div className="flex justify-between items-baseline"><h2 className="font-display text-[18px] font-bold">{t.answered_week}</h2><span className="font-mono num">{done.length}/{team.players.length}</span></div>
           <span className="label">{t.week_of_fn} {week}</span>
           <ul className="grid gap-1.5">{done.map((p) => {
-            const w = p.wellness.at(-1)!
+            const w = answerOf(p, week)!
             return <li key={p.id}><button className="flex flex-wrap gap-2 items-center text-left" onClick={() => openPlayer(p.id)}><span className="font-medium">{p.name}</span>{w.pain && <Chip level={w.pain.level >= 4 || w.pain.stopped ? 'bad' : 'warn'}>{zone(w.pain.zone, lang)} {w.pain.level}/10</Chip>}{w.comment && <span className="muted text-[13px]">«{w.comment}»</span>}</button></li>
           })}{done.length === 0 && <li className="muted">—</li>}</ul>
         </section>
@@ -655,6 +662,40 @@ function SurveyShare({ t, lang, today, team, openPlayer, toast, onNewLink }: { t
           <ul className="grid gap-1.5">{missing.map((p) => <li key={p.id} className="muted">{p.name}</li>)}{missing.length === 0 && <li className="tx-ok">✓</li>}</ul>
         </section>
       </div>
+      <section className="card p-5 grid gap-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="grid gap-1"><h2 className="font-display text-[20px] font-bold">{t.conclusions_title}</h2><p className="muted text-[14px]">{t.conclusions_sub}</p></div>
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label={t.week_of_fn}>
+            {weeks.slice(-6).map((w) => <button key={w} className="pill text-[13px]" aria-pressed={w === week} onClick={() => setWeek(w)}>{w}</button>)}
+          </div>
+        </div>
+        <ul className="grid gap-2">{notes.map((c, i) => <li key={i}><Chip level={c.level}>{c.text}</Chip></li>)}</ul>
+      </section>
+      <section className="card grid">
+        <div className="p-5 pb-3 grid gap-1"><h2 className="font-display text-[20px] font-bold">{t.answers_title} · {t.week_of_fn.toLowerCase()} {week}</h2><p className="muted text-[14px]">{t.answers_sub}</p></div>
+        <div className="overflow-x-auto">
+          <table className="grid-t min-w-[860px]">
+            <thead><tr>{[t.col_player, ...DIMS.map((d) => dimLabel[d]), t.col_mean, t.col_pain, t.col_comment].map((h) => <th key={h} className="label">{h}</th>)}</tr></thead>
+            <tbody>
+              {rows.map(({ p, w }) => (
+                <tr key={p.id} onClick={() => openPlayer(p.id)}>
+                  <td className="font-medium">{p.name}</td>
+                  {DIMS.map((d) => <td key={d}><span className={`num font-mono inline-block min-w-[28px] text-center rounded px-1.5 py-0.5 ${cell(w[d])}`}>{w[d]}</span></td>)}
+                  <td className="num font-mono font-bold">{fmt(wellnessScore(w))}</td>
+                  <td>{w.pain ? <Chip level={w.pain.level >= 4 || w.pain.stopped ? 'bad' : 'warn'}>{zone(w.pain.zone, lang)} {w.pain.level}/10{w.pain.stopped ? ' ⛔' : ''}</Chip> : <span className="faint">—</span>}</td>
+                  <td className="text-[13px] max-w-[260px]">{w.comment ?? <span className="faint">—</span>}</td>
+                </tr>
+              ))}
+              {missing.map((p) => (
+                <tr key={p.id} onClick={() => openPlayer(p.id)}>
+                  <td className="muted">{p.name}</td>
+                  <td colSpan={8} className="faint text-[13px]">{t.no_answer}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   )
 }
