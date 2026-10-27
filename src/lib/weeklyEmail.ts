@@ -2,6 +2,7 @@
 import type { Team } from './data'
 import { deriveTeam, mondaySummary, type Level } from './derive'
 import { loadView } from './load'
+import { warmupLine } from './warmup'
 import { conclusions, mondayLabel, surveyWeeks } from './survey'
 
 const COLOR: Record<Level, string> = { bad: '#b3261e', warn: '#a8640a', ok: '#1d7a4a', info: '#1f5fbf' }
@@ -21,7 +22,8 @@ export function weeklyEmail(teams: Team[], coach: string, appUrl: string, today:
     const notes = conclusions(team.players, weeks, week, 'ca').filter((c) => c.level === 'bad' || c.level === 'warn').slice(0, 8)
     const answered = team.players.filter((p) => p.wellness.some((w) => w.week === week)).length
     const sessions = team.players.reduce((a, p) => a + loadView(p.loads, today).sessions, 0)
-    blocks.push({ team, summary: mondaySummary(views, 'ca'), notes, answered, sessions })
+    const wl = warmupLine(team.warmups, today, 'ca')
+    blocks.push({ team, summary: [...mondaySummary(views, 'ca'), ...(wl ? [wl] : [])], notes, answered, sessions })
   }
   if (!blocks.length) return null
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
-import Workspace, { Brand, LangToggle, Logo, todayISO, useLang } from '@/App'
+import Workspace, { Brand, LangToggle, Logo, SleepHours, todayISO, useLang } from '@/App'
 import { CLUB, TEAMS, TODAY, type Player, type Team } from '@/lib/data'
 import * as db from '@/lib/db'
 import { fmt } from '@/lib/derive'
@@ -161,7 +161,7 @@ function Signed({ lang, setLang, email }: { lang: Lang; setLang: (l: Lang) => vo
     <>
     {editProfile && <ProfileSheet t={t} value={profile} onClose={() => setEditProfile(false)} onSave={async (p) => { await db.saveProfile(p); setProfile(p); setEditProfile(false) }} />}
     <Workspace demo={false} teams={teams} club={{ name: profile.club_name, town: profile.town }} today={todayISO()} lang={lang} setLang={setLang} account={account}
-      actions={{ saveMeasure: wrap(db.saveMeasure), addInjury: wrap(db.addInjury), setInjuryStatus: wrap(db.setInjuryStatus), newSurveyLink: wrap(db.newSurveyLink), deleteMeasure: wrap(db.deleteMeasure), saveLoads: wrap(db.saveLoads) }}
+      actions={{ saveMeasure: wrap(db.saveMeasure), addInjury: wrap(db.addInjury), setInjuryStatus: wrap(db.setInjuryStatus), newSurveyLink: wrap(db.newSurveyLink), deleteMeasure: wrap(db.deleteMeasure), saveLoads: wrap(db.saveLoads), setWarmup: wrap(db.setWarmup) }}
       manage={({ t, lang, teams, toast }) => <Manage t={t} lang={lang} teams={teams} profile={profile} toast={toast} reload={reload} />} />
     </>
   )
@@ -454,15 +454,16 @@ function PublicSurvey({ token, effort, lang, setLang }: { token: string; effort:
   const [stopped, setStopped] = useState(false)
   const [scores, setScores] = useState<Record<'energy' | 'sleep' | 'legs' | 'stress' | 'mood', number>>({ energy: 0, sleep: 0, legs: 0, stress: 0, mood: 0 })
   const [comment, setComment] = useState('')
+  const [hours, setHours] = useState(0)
   const [state, setState] = useState<'form' | 'sending' | 'sent' | 'error'>('form')
 
   useEffect(() => { if (configured) db.surveyTeam(token).then(setInfo).catch(() => setInfo(null)); else setInfo(null) }, [token])
   const dims: [keyof typeof scores, string][] = [['energy', t.energy], ['sleep', t.sleep], ['legs', t.legs], ['stress', t.stress], ['mood', t.mood]]
-  const ready = who && pain !== null && Object.values(scores).every((x) => x > 0)
-  const reset = () => { setWho(''); setPain(null); setLevel(3); setStopped(false); setScores({ energy: 0, sleep: 0, legs: 0, stress: 0, mood: 0 }); setComment(''); setState('form'); window.scrollTo({ top: 0 }) }
+  const ready = who && pain !== null && hours > 0 && Object.values(scores).every((x) => x > 0)
+  const reset = () => { setWho(''); setPain(null); setLevel(3); setStopped(false); setScores({ energy: 0, sleep: 0, legs: 0, stress: 0, mood: 0 }); setHours(0); setComment(''); setState('form'); window.scrollTo({ top: 0 }) }
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); if (!ready) return; setState('sending')
-    try { await db.submitSurvey(token, who, { ...scores, pain: pain ? { zone: zoneV, level, side, stopped } : null, comment: comment.trim() || undefined }); setState('sent') } catch { setState('error') }
+    try { await db.submitSurvey(token, who, { ...scores, sleepHours: hours, pain: pain ? { zone: zoneV, level, side, stopped } : null, comment: comment.trim() || undefined }); setState('sent') } catch { setState('error') }
   }
 
   return (
@@ -511,6 +512,7 @@ function PublicSurvey({ token, effort, lang, setLang }: { token: string; effort:
                   <div className="flex gap-1.5">{FACES.map((f, i) => <button type="button" key={i} className="scale-btn" aria-label={`${l} ${i + 1}`} aria-pressed={scores[k] === i + 1} onClick={() => setScores({ ...scores, [k]: i + 1 })}>{f}</button>)}</div>
                 </fieldset>
               ))}
+              <SleepHours big label={t.sleep_hours_q} value={hours} onChange={setHours} />
               <label className="field"><span className="text-[14px] font-medium">{t.comment_q} <span className="faint">({t.optional})</span></span>
                 <textarea rows={2} maxLength={500} value={comment} onChange={(e) => setComment(e.target.value)} />
               </label>

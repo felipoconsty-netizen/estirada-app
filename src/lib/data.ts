@@ -12,6 +12,7 @@ export interface Wellness {
   legs: number
   stress: number
   mood: number
+  sleepHours?: number // hores de son per nit (aprox.)
   pain: { zone: string; level: number; side: string; stopped: boolean } | null
   comment?: string
 }
@@ -52,6 +53,7 @@ export interface Team {
   sport: string
   coach: string
   players: Player[]
+  warmups?: string[] // dies (ISO) en què s'ha fet l'escalfament de prevenció
 }
 
 // Generador pseudoaleatori estable perquè la demo surti sempre igual.
@@ -81,6 +83,7 @@ interface Spec {
   comment?: string
   spike?: boolean // la darrera setmana ha entrenat molt més (dos equips, campus…)
   stale?: boolean // fa mesos que no es mesura
+  shortSleep?: boolean // dorm poc les últimes setmanes
 }
 
 /** Sis setmanes d'entrenaments (dl, dc, dj) i partit en dissabte fins a TODAY. */
@@ -124,7 +127,8 @@ function build(sex: Sex, spec: Spec, seed: number): Player {
     const p = spec.pain && i >= spec.pain.from
       ? { zone: spec.pain.zone, level: spec.pain.levels[Math.min(i - spec.pain.from, spec.pain.levels.length - 1)], side: spec.pain.side, stopped: !!spec.pain.stopped && i === WEEKS.length - 1 }
       : null
-    return { week: w, energy: v(), sleep: v(), legs: v(), stress: v(), mood: v(), pain: p, comment: i === WEEKS.length - 1 ? spec.comment : undefined }
+    const hours = spec.shortSleep && i >= WEEKS.length - 3 ? 6.5 + Math.round(r()) * 0.5 : 8 + Math.round(r() * 3) * 0.5
+    return { week: w, energy: v(), sleep: v(), legs: v(), stress: v(), mood: v(), sleepHours: hours, pain: p, comment: i === WEEKS.length - 1 ? spec.comment : undefined }
   })
   return {
     id: spec.name.toLowerCase().normalize('NFD').replace(/[^a-z]/g, ''),
@@ -146,7 +150,7 @@ const cadetF: Spec[] = [
   { name: 'Noa Puig', age: 14.2, phvAge: 12.4, adult: 162, bmi: 20.5 },
   { name: 'Mariona Vidal', age: 13.9, phvAge: 12.3, adult: 172, bmi: 17.4 },
   { name: 'Aina Roca', age: 14.8, phvAge: 11.9, adult: 160, bmi: 22.1 },
-  { name: 'Clara Serra', age: 13.6, phvAge: 12.9, adult: 168, bmi: 18.6, dip: 6, spike: true, comment: 'Molts exàmens aquesta setmana' },
+  { name: 'Clara Serra', age: 13.6, phvAge: 12.9, adult: 168, bmi: 18.6, dip: 6, spike: true, shortSleep: true, comment: 'Molts exàmens aquesta setmana' },
   { name: 'Ona Font', age: 14.4, phvAge: 12.1, adult: 165, bmi: 19.1, injuries: [{ date: '2026-09-12', zone: 'Turmell esquerre', note: 'Esquinç lleu en partit', status: 'tancada' }] },
   { name: 'Paula Martí', age: 14.0, phvAge: 12.7, adult: 175, bmi: 18.0 },
   { name: 'Emma Costa', age: 13.2, phvAge: 12.6, adult: 164, bmi: 18.9, pain: { from: 6, zone: 'Taló', levels: [2, 3], side: 'Esquerre' } },
@@ -175,16 +179,28 @@ const infantilM: Spec[] = [
   { name: 'Nil Sabaté', age: 13.4, phvAge: 13.9, adult: 176, bmi: 19.4 },
   { name: 'Arnau Vila', age: 13.7, phvAge: 12.9, adult: 180, bmi: 18.0 },
   { name: 'Èric Serrat', age: 13.1, phvAge: 14.6, adult: 174, bmi: 17.2 },
-  { name: 'Jan Mir', age: 13.8, phvAge: 13.5, adult: 188, bmi: 18.5, dip: 6 },
+  { name: 'Jan Mir', age: 13.8, phvAge: 13.5, adult: 188, bmi: 18.5, dip: 6, shortSleep: true },
   { name: 'Oriol Badia', age: 13.3, phvAge: 13.4, adult: 179, bmi: 20.1 },
   { name: 'Guillem Ros', age: 13.5, phvAge: 14.0, adult: 177, bmi: 18.9 },
   { name: 'Roc Esteve', age: 13.9, phvAge: 12.8, adult: 183, bmi: 19.0 },
 ]
 
+/** Escalfaments de prevenció de les últimes 5 setmanes: els dies d'entrenament (dl, dc, dj), amb el compliment que es demani. */
+function buildWarmups(rate: number, seed: number): string[] {
+  const r = rng(seed)
+  const out: string[] = []
+  const end = new Date(TODAY + 'T12:00:00')
+  for (let back = 35; back >= 0; back--) {
+    const d = new Date(end); d.setDate(d.getDate() - back)
+    if ([1, 3, 4].includes(d.getDay()) && r() < rate) out.push(d.toISOString().slice(0, 10))
+  }
+  return out
+}
+
 export const CLUB = { name: 'CB Exemple', town: 'Granollers' }
 
 export const TEAMS: Team[] = [
-  { id: 'cadet-f', name: 'Cadet Femení A', sport: 'Bàsquet', coach: 'Entrenadora: Marta G.', players: cadetF.map((s, i) => build('F', s, 101 + i * 17)) },
-  { id: 'infantil-f', name: 'Infantil Femení', sport: 'Bàsquet', coach: 'Entrenador: Jordi P.', players: infantilF.map((s, i) => build('F', s, 501 + i * 13)) },
-  { id: 'infantil-m', name: 'Infantil Masculí', sport: 'Bàsquet', coach: 'Entrenador: Xavi R.', players: infantilM.map((s, i) => build('M', s, 901 + i * 11)) },
+  { id: 'cadet-f', name: 'Cadet Femení A', sport: 'Bàsquet', coach: 'Entrenadora: Marta G.', players: cadetF.map((s, i) => build('F', s, 101 + i * 17)), warmups: buildWarmups(0.85, 7) },
+  { id: 'infantil-f', name: 'Infantil Femení', sport: 'Bàsquet', coach: 'Entrenador: Jordi P.', players: infantilF.map((s, i) => build('F', s, 501 + i * 13)), warmups: buildWarmups(0.45, 11) },
+  { id: 'infantil-m', name: 'Infantil Masculí', sport: 'Bàsquet', coach: 'Entrenador: Xavi R.', players: infantilM.map((s, i) => build('M', s, 901 + i * 11)), warmups: buildWarmups(0.2, 13) },
 ]

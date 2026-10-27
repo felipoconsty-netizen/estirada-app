@@ -1,5 +1,5 @@
 import type { Player, Team, Wellness } from './data'
-import { ageAt, growthVelocity, maturityOffset, phaseOf, targetHeight, type Lang, type Phase, type PhaseKey } from './phv'
+import { ageAt, birthQuarter, FAST_GROWTH, growthVelocity, maturityOffset, pahBand, phaseOf, predictAdultHeight, targetHeight, type Lang, type PahBand, type Phase, type PhaseKey } from './phv'
 import { zone } from './i18n'
 import { daysSinceMeasure, loadAlert, loadView, measureEvery, type LoadView } from './load'
 
@@ -18,8 +18,14 @@ export interface PlayerView {
   phase: Phase
   velocity: number | null
   height: number
-  target: number
-  pctAdult: number
+  target: number // alçada diana dels pares (Tanner)
+  pah: number | null // alçada adulta prevista (Khamis-Roche)
+  pctAdult: number // % de l'alçada adulta: Khamis-Roche si hi ha pares, si no respecte a la diana
+  band: PahBand | null
+  fast: boolean // creix més de FAST_GROWTH cm/any
+  quarter: number // trimestre de naixement
+  sleepHours: number | null // última resposta
+  shortSleep: boolean // menys de 8 h les dues últimes respostes
   wellnessSeries: number[]
   wellnessNow: number
   pain: Wellness['pain']
@@ -69,6 +75,13 @@ export function derive(p: Player, lang: Lang, today: string): PlayerView | null 
   const phase = phaseOf(offset)
   const velocity = growthVelocity(p.measures)
   const target = targetHeight(p.sex, p.father, p.mother)
+  const pah = predictAdultHeight(p.sex, age, m.height, m.mass, p.father, p.mother)
+  const pctAdult = Math.min(100, (m.height / (pah ?? target)) * 100)
+  const band = pah ? pahBand(pctAdult) : null
+  const fast = velocity !== null && velocity >= FAST_GROWTH
+  const slept = p.wellness.filter((w) => w.sleepHours).slice(-2)
+  const sleepHours = p.wellness.at(-1)?.sleepHours ?? null
+  const shortSleep = slept.length === 2 && slept.every((w) => w.sleepHours! < 8)
   const series = p.wellness.map(wellnessScore)
   const now = series[series.length - 1]
   const prev = series.slice(-5, -1)
@@ -85,7 +98,15 @@ export function derive(p: Player, lang: Lang, today: string): PlayerView | null 
   const alerts: Alert[] = []
   if (phase.key === 'plena') alerts.push({ level: 'bad', text: es ? 'En pleno estirón: menos saltos e impactos' : 'En plena estirada: menys salts i impactes' })
   else if (phase.level === 'warn') alerts.push({ level: 'warn', text: `${phase.label[lang]}: ${es ? 'vigilar la carga' : 'vigilar la càrrega'}` })
-  if (velocity !== null && velocity >= 7.5) alerts.push({ level: 'warn', text: `${es ? 'Crece rápido' : 'Creix ràpid'}: ${fmt(velocity)} ${es ? 'cm/año' : 'cm/any'}` })
+  if (fast) alerts.push({ level: pain && /genoll|rodilla|talo|aquil/.test(fold(pain.zone)) ? 'bad' : 'warn', text: es
+    ? `Crece rápido: ${fmt(velocity!)} cm/año. Más riesgo de lesiones de crecimiento: menos saltos y vigila rodillas y talones`
+    : `Creix ràpid: ${fmt(velocity!)} cm/any. Més risc de lesions de creixement: menys salts i vigila genolls i talons` })
+  if (band && ((phase.key === 'pre' && pctAdult >= 92) || (phase.key === 'post' && pctAdult < 88))) alerts.push({ level: 'info', text: es
+    ? `Las dos estimaciones no coinciden (${phase.label.es.toLowerCase()} y ${fmt(pctAdult)} % de la altura adulta). Vuelve a medir con cuidado.`
+    : `Les dues estimacions no coincideixen (${phase.label.ca.toLowerCase()} i ${fmt(pctAdult)} % de l'alçada adulta). Torna a mesurar amb cura.` })
+  if (shortSleep) alerts.push({ level: fast || phase.key === 'plena' ? 'bad' : 'warn', text: es
+    ? `Duerme poco: menos de 8 h dos semanas seguidas${fast || phase.key === 'plena' ? ' y está creciendo' : ''}`
+    : `Dorm poc: menys de 8 h dues setmanes seguides${fast || phase.key === 'plena' ? ' i està creixent' : ''}` })
   if (pain) {
     const lvl: Level = pain.level >= 4 || pain.stopped ? 'bad' : 'warn'
     const weeks = streak >= 2 ? ` · ${streak} ${es ? 'semanas seguidas' : 'setmanes seguides'}` : ''
@@ -93,7 +114,7 @@ export function derive(p: Player, lang: Lang, today: string): PlayerView | null 
     if (pain.stopped) alerts.push({ level: 'bad', text: es ? 'No ha podido entrenar esta semana' : 'No ha pogut entrenar aquesta setmana' })
     if (gPain) alerts.push({ level: pain.level >= 4 || streak >= 2 || pain.stopped ? 'bad' : 'warn', text: gPain })
   }
-  const la = loadAlert(load, phase.key, lang)
+  const la = loadAlert(load, phase.key, lang, fast || (band === 'pic'))
   if (la) alerts.push(la)
   if (measureDue) alerts.push({ level: 'info', text: es ? `Hace ${Math.floor(measureDays / 7)} semanas que no se mide` : `Fa ${Math.floor(measureDays / 7)} setmanes que no es mesura` })
   if (prev.length && now <= prevAvg - 0.8) alerts.push({ level: 'warn', text: es ? 'Bienestar a la baja respecto a las últimas semanas' : 'Benestar a la baixa respecte a les últimes setmanes' })
@@ -102,8 +123,8 @@ export function derive(p: Player, lang: Lang, today: string): PlayerView | null 
   const level = alerts.reduce<'ok' | 'warn' | 'bad'>((acc, a) => (rank[a.level] > rank[acc] ? (a.level as 'warn' | 'bad') : acc), 'ok')
 
   return {
-    p, age, offset, phvAge: age - offset, phase, velocity, height: m.height, target,
-    pctAdult: Math.min(100, (m.height / target) * 100),
+    p, age, offset, phvAge: age - offset, phase, velocity, height: m.height, target, pah, pctAdult, band, fast,
+    quarter: birthQuarter(p.dob), sleepHours, shortSleep,
     wellnessSeries: series, wellnessNow: now, pain, growthPain: gPain, load, measureDays, measureDue, alerts, level,
   }
 }
@@ -133,7 +154,8 @@ export function mondaySummary(views: PlayerView[], lang: Lang): { level: Level; 
   const plena = views.filter((v) => v.phase.key === 'plena')
   const pain = views.filter((v) => v.pain && (v.pain.level >= 4 || v.pain.stopped) && !v.growthPain)
   const lowW = views.filter((v) => v.alerts.some((a) => a.text.startsWith('Benestar') || a.text.startsWith('Bienestar')))
-  const fast = views.filter((v) => v.velocity !== null && v.velocity >= 7.5)
+  const fast = views.filter((v) => v.fast)
+  const sleepy = views.filter((v) => v.shortSleep)
   const gp = views.filter((v) => v.growthPain)
   const heavy = views.filter((v) => v.alerts.some((a) => a.text.startsWith('Càrrega') || a.text.startsWith('Carga')))
   const due = views.filter((v) => v.measureDue)
@@ -149,8 +171,11 @@ export function mondaySummary(views: PlayerView[], lang: Lang): { level: Level; 
     ? `${list(heavy, lang)} ${one(heavy) ? 'ha acumulado' : 'han acumulado'} mucha más carga que su media del mes. Haz una sesión más suave o con menos minutos.`
     : `${list(heavy, lang)} ${one(heavy) ? 'ha acumulat' : 'han acumulat'} molta més càrrega que la seva mitjana del mes. Fes una sessió més suau o amb menys minuts.` })
   if (fast.length) out.push({ level: 'warn', text: es
-    ? `${list(fast, lang)} ${one(fast) ? 'ha crecido' : 'han crecido'} muy deprisa desde la última medición. Puede notarse más descoordinación.`
-    : `${list(fast, lang)} ${one(fast) ? 'ha crescut' : 'han crescut'} molt de pressa des de l'última mesura. Es pot notar més descoordinació.` })
+    ? `${list(fast, lang)} ${one(fast) ? 'crece' : 'crecen'} más de ${fmt(FAST_GROWTH)} cm/año. Es cuando más se lesionan por crecimiento: menos saltos y vigila rodillas y talones.`
+    : `${list(fast, lang)} ${one(fast) ? 'creix' : 'creixen'} més de ${fmt(FAST_GROWTH)} cm/any. És quan més es lesionen pel creixement: menys salts i vigila genolls i talons.` })
+  if (sleepy.length) out.push({ level: 'warn', text: es
+    ? `${list(sleepy, lang)} ${one(sleepy) ? 'duerme' : 'duermen'} menos de 8 horas desde hace dos semanas. Dormir poco aumenta el riesgo de lesión: coméntalo también con la familia.`
+    : `${list(sleepy, lang)} ${one(sleepy) ? 'dorm' : 'dormen'} menys de 8 hores des de fa dues setmanes. Dormir poc augmenta el risc de lesió: comenta-ho també amb la família.` })
   if (lowW.length) out.push({ level: 'warn', text: es
     ? `${list(lowW, lang)} ${one(lowW) ? 'dice' : 'dicen'} que se encuentra${one(lowW) ? '' : 'n'} peor que otras semanas. Una charla corta puede ayudar.`
     : `${list(lowW, lang)} ${one(lowW) ? 'diu que es troba' : 'diuen que es troben'} pitjor que altres setmanes. Una conversa curta pot ajudar.` })

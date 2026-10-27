@@ -87,6 +87,15 @@ export function conclusions(players: Player[], weeks: string[], week: string, la
   if (weakV < 3.5) out.push({ level: weakV < 3 ? 'bad' : 'warn', text: `${es ? 'El punto más flojo del equipo es' : 'El punt més fluix de l’equip és'} ${es ? 'el' : 'el'} ${dimName(weak, lang)} (${fmt(weakV)}/5): ${DIM_TIP[lang][weak]}.` })
   if (strongV >= 4) out.push({ level: 'ok', text: `${es ? 'Lo mejor' : 'El millor'}: ${dimName(strong, lang)} (${fmt(strongV)}/5).` })
 
+  // Hores de son
+  const slept = done.map((p) => ({ p, h: answerOf(p, week)!.sleepHours })).filter((x): x is { p: Player; h: number } => !!x.h)
+  if (slept.length) {
+    const short = slept.filter((x) => x.h < 8)
+    const avgH = fmt(mean(slept.map((x) => x.h)))
+    out.push({ level: short.length > slept.length / 3 ? 'warn' : 'ok', text: (es ? `Duermen ${avgH} h de media.` : `Dormen ${avgH} h de mitjana.`)
+      + (short.length ? (es ? ` Menos de 8 h: ${short.map((x) => `${x.p.name} (${fmt(x.h)} h)`).join(', ')}. A estas edades se recomiendan 8–10 h.` : ` Menys de 8 h: ${short.map((x) => `${x.p.name} (${fmt(x.h)} h)`).join(', ')}. A aquestes edats es recomanen 8–10 h.`) : '') })
+  }
+
   // Dolor
   for (const p of done) {
     const w = answerOf(p, week)!

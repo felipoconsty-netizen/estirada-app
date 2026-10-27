@@ -34,9 +34,52 @@ function growthVelocity(measures) {
   const a = measures[measures.length - 2];
   const b = measures[measures.length - 1];
   const years = (new Date(b.date).getTime() - new Date(a.date).getTime()) / (365.25 * 24 * 3600 * 1e3);
-  if (years <= 0.05) return null;
+  if (years <= 0.08) return null;
   return (b.height - a.height) / years;
 }
+var FAST_GROWTH = 7.2;
+var KR = [
+  [4, [-10.2567, 1.23812, -0.087235, 0.50286], [-8.1325, 1.24768, -0.19435, 0.44774]],
+  [4.5, [-10.719, 1.15964, -0.074454, 0.52887], [-6.47656, 1.22177, -0.18519, 0.41381]],
+  [5, [-11.0213, 1.10674, -0.06478, 0.53919], [-5.13582, 1.19932, -0.1753, 0.38467]],
+  [5.5, [-11.1556, 1.0748, -0.05776, 0.53691], [-4.13791, 1.1788, -0.16484, 0.36039]],
+  [6, [-11.1138, 1.05923, -0.052947, 0.52513], [-3.51039, 1.15866, -0.154, 0.34105]],
+  [6.5, [-11.0221, 1.05542, -0.049892, 0.50692], [-3.14322, 1.13737, -0.14294, 0.32672]],
+  [7, [-10.9984, 1.05877, -0.048144, 0.48538], [-2.87645, 1.11342, -0.13184, 0.31748]],
+  [7.5, [-11.0214, 1.06467, -0.047256, 0.46361], [-2.66291, 1.08525, -0.12086, 0.3134]],
+  [8, [-11.0696, 1.06853, -0.046778, 0.44469], [-2.45559, 1.05135, -0.11019, 0.31457]],
+  [8.5, [-11.122, 1.06572, -0.046255, 0.43171], [-2.20728, 1.01018, -0.09999, 0.32105]],
+  [9, [-11.1571, 1.05166, -0.045254, 0.42776], [-1.87098, 0.9602, -0.09044, 0.33291]],
+  [9.5, [-11.1405, 1.02174, -0.043311, 0.43593], [-1.0633, 0.89989, -0.08171, 0.35025]],
+  [10, [-11.038, 0.97135, -0.039981, 0.45932], [0.33468, 0.82771, -0.07397, 0.37312]],
+  [10.5, [-10.8286, 0.89589, -0.034814, 0.50101], [1.97366, 0.74213, -0.06739, 0.40161]],
+  [11, [-10.4917, 0.81239, -0.02905, 0.54781], [3.50436, 0.67173, -0.06136, 0.42042]],
+  [11.5, [-10.0065, 0.74134, -0.024167, 0.58409], [4.57747, 0.6415, -0.05518, 0.41686]],
+  [12, [-9.3522, 0.68325, -0.020076, 0.60927], [4.84365, 0.64452, -0.04894, 0.3949]],
+  [12.5, [-8.6055, 0.63869, -0.016681, 0.62279], [4.27869, 0.67386, -0.04272, 0.3585]],
+  [13, [-7.8632, 0.60818, -0.013895, 0.62407], [3.21417, 0.7226, -0.03661, 0.31163]],
+  [13.5, [-7.1348, 0.59228, -0.011618, 0.61253], [1.83456, 0.78383, -0.03067, 0.25826]],
+  [14, [-6.4299, 0.59151, -9776e-6, 0.58762], [0.32425, 0.85062, -0.025, 0.20235]],
+  [14.5, [-5.7578, 0.60643, -8256e-6, 0.54875], [-1.13224, 0.91605, -0.01967, 0.14787]],
+  [15, [-5.1282, 0.63757, -6994e-6, 0.49536], [-2.35055, 0.97319, -0.01477, 0.0988]],
+  [15.5, [-4.5092, 0.68548, -5863e-6, 0.42687], [-3.10326, 1.01514, -0.01037, 0.05909]],
+  [16, [-3.9292, 0.75069, -4795e-6, 0.34271], [-3.17885, 1.03496, -655e-5, 0.03272]],
+  [16.5, [-3.4873, 0.83375, -3695e-6, 0.24231], [-2.41657, 1.02573, -34e-4, 0.02364]],
+  [17, [-3.283, 0.9352, -247e-5, 0.1251], [-0.65579, 0.98054, -1e-3, 0.03584]],
+  [17.5, [-3.4156, 1.05558, -1033e-6, -95e-4], [2.26429, 0.89246, 57e-5, 0.07327]]
+];
+function predictAdultHeight(sex, age, height, mass, father, mother) {
+  if (!(father > 100 && mother > 100) || age < 4 || age > 17.75) return null;
+  const i = KR.findIndex(([a]) => a >= Math.min(age, 17.5));
+  const k = (r) => sex === "M" ? r[1] : r[2];
+  const hi = k(KR[i]), lo = k(KR[Math.max(0, i - 1)]);
+  const w = i === 0 || age >= 17.5 ? 1 : (age - KR[i - 1][0]) / 0.5;
+  const c = hi.map((x, j) => lo[j] + (x - lo[j]) * w);
+  const inches = c[0] + c[1] * (height / 2.54) + c[2] * (mass * 2.20462) + c[3] * ((father + mother) / 2 / 2.54);
+  return Math.max(height, inches * 2.54);
+}
+var pahBand = (pct) => pct < 85 ? "lluny" : pct < 90 ? "acosta" : pct <= 95 ? "pic" : "despres";
+var birthQuarter = (dob) => Math.floor((Number(dob.slice(5, 7)) - 1) / 3) + 1;
 
 // src/lib/i18n.ts
 var ZONES = { Genoll: "Rodilla", Tal\u00F3: "Tal\xF3n", Turmell: "Tobillo", Esquena: "Espalda", Maluc: "Cadera", Espatlla: "Hombro", Canell: "Mu\xF1eca", "Turmell esquerre": "Tobillo izquierdo" };
@@ -57,9 +100,9 @@ function loadView(loads, today) {
   return { week, avg, ratio: avg ? week / avg : null, sessions: within(7).length, lastRpe: last?.rpe ?? null };
 }
 var growing = (k) => k === "entrant" || k === "plena";
-function loadAlert(v, phase, lang) {
+function loadAlert(v, phase, lang, fast = false) {
   if (v.ratio === null) return null;
-  const g = growing(phase);
+  const g = growing(phase) || fast;
   if (v.ratio < (g ? 1.3 : 1.5)) return null;
   const es = lang === "es";
   const x = v.ratio.toLocaleString("es-ES", { maximumFractionDigits: 1 });
@@ -100,6 +143,13 @@ function derive(p, lang, today) {
   const phase = phaseOf(offset);
   const velocity = growthVelocity(p.measures);
   const target = targetHeight(p.sex, p.father, p.mother);
+  const pah = predictAdultHeight(p.sex, age, m.height, m.mass, p.father, p.mother);
+  const pctAdult = Math.min(100, m.height / (pah ?? target) * 100);
+  const band = pah ? pahBand(pctAdult) : null;
+  const fast = velocity !== null && velocity >= FAST_GROWTH;
+  const slept = p.wellness.filter((w) => w.sleepHours).slice(-2);
+  const sleepHours = p.wellness.at(-1)?.sleepHours ?? null;
+  const shortSleep = slept.length === 2 && slept.every((w) => w.sleepHours < 8);
   const series = p.wellness.map(wellnessScore);
   const now = series[series.length - 1];
   const prev = series.slice(-5, -1);
@@ -115,7 +165,9 @@ function derive(p, lang, today) {
   const alerts = [];
   if (phase.key === "plena") alerts.push({ level: "bad", text: es ? "En pleno estir\xF3n: menos saltos e impactos" : "En plena estirada: menys salts i impactes" });
   else if (phase.level === "warn") alerts.push({ level: "warn", text: `${phase.label[lang]}: ${es ? "vigilar la carga" : "vigilar la c\xE0rrega"}` });
-  if (velocity !== null && velocity >= 7.5) alerts.push({ level: "warn", text: `${es ? "Crece r\xE1pido" : "Creix r\xE0pid"}: ${fmt(velocity)} ${es ? "cm/a\xF1o" : "cm/any"}` });
+  if (fast) alerts.push({ level: pain && /genoll|rodilla|talo|aquil/.test(fold(pain.zone)) ? "bad" : "warn", text: es ? `Crece r\xE1pido: ${fmt(velocity)} cm/a\xF1o. M\xE1s riesgo de lesiones de crecimiento: menos saltos y vigila rodillas y talones` : `Creix r\xE0pid: ${fmt(velocity)} cm/any. M\xE9s risc de lesions de creixement: menys salts i vigila genolls i talons` });
+  if (band && (phase.key === "pre" && pctAdult >= 92 || phase.key === "post" && pctAdult < 88)) alerts.push({ level: "info", text: es ? `Las dos estimaciones no coinciden (${phase.label.es.toLowerCase()} y ${fmt(pctAdult)} % de la altura adulta). Vuelve a medir con cuidado.` : `Les dues estimacions no coincideixen (${phase.label.ca.toLowerCase()} i ${fmt(pctAdult)} % de l'al\xE7ada adulta). Torna a mesurar amb cura.` });
+  if (shortSleep) alerts.push({ level: fast || phase.key === "plena" ? "bad" : "warn", text: es ? `Duerme poco: menos de 8 h dos semanas seguidas${fast || phase.key === "plena" ? " y est\xE1 creciendo" : ""}` : `Dorm poc: menys de 8 h dues setmanes seguides${fast || phase.key === "plena" ? " i est\xE0 creixent" : ""}` });
   if (pain) {
     const lvl = pain.level >= 4 || pain.stopped ? "bad" : "warn";
     const weeks = streak >= 2 ? ` \xB7 ${streak} ${es ? "semanas seguidas" : "setmanes seguides"}` : "";
@@ -123,7 +175,7 @@ function derive(p, lang, today) {
     if (pain.stopped) alerts.push({ level: "bad", text: es ? "No ha podido entrenar esta semana" : "No ha pogut entrenar aquesta setmana" });
     if (gPain) alerts.push({ level: pain.level >= 4 || streak >= 2 || pain.stopped ? "bad" : "warn", text: gPain });
   }
-  const la = loadAlert(load, phase.key, lang);
+  const la = loadAlert(load, phase.key, lang, fast || band === "pic");
   if (la) alerts.push(la);
   if (measureDue) alerts.push({ level: "info", text: es ? `Hace ${Math.floor(measureDays / 7)} semanas que no se mide` : `Fa ${Math.floor(measureDays / 7)} setmanes que no es mesura` });
   if (prev.length && now <= prevAvg - 0.8) alerts.push({ level: "warn", text: es ? "Bienestar a la baja respecto a las \xFAltimas semanas" : "Benestar a la baixa respecte a les \xFAltimes setmanes" });
@@ -138,7 +190,13 @@ function derive(p, lang, today) {
     velocity,
     height: m.height,
     target,
-    pctAdult: Math.min(100, m.height / target * 100),
+    pah,
+    pctAdult,
+    band,
+    fast,
+    quarter: birthQuarter(p.dob),
+    sleepHours,
+    shortSleep,
     wellnessSeries: series,
     wellnessNow: now,
     pain,
@@ -166,7 +224,8 @@ function mondaySummary(views, lang) {
   const plena = views.filter((v) => v.phase.key === "plena");
   const pain = views.filter((v) => v.pain && (v.pain.level >= 4 || v.pain.stopped) && !v.growthPain);
   const lowW = views.filter((v) => v.alerts.some((a) => a.text.startsWith("Benestar") || a.text.startsWith("Bienestar")));
-  const fast = views.filter((v) => v.velocity !== null && v.velocity >= 7.5);
+  const fast = views.filter((v) => v.fast);
+  const sleepy = views.filter((v) => v.shortSleep);
   const gp = views.filter((v) => v.growthPain);
   const heavy = views.filter((v) => v.alerts.some((a) => a.text.startsWith("C\xE0rrega") || a.text.startsWith("Carga")));
   const due = views.filter((v) => v.measureDue);
@@ -175,7 +234,8 @@ function mondaySummary(views, lang) {
   if (pain.length) out.push({ level: "bad", text: es ? `${list(pain, lang)} ${one(pain) ? "tiene" : "tienen"} dolor fuerte o repetido. H\xE1blalo antes de entrenar y, si sigue, que lo vea el fisio.` : `${list(pain, lang)} ${one(pain) ? "t\xE9" : "tenen"} dolor fort o repetit. Parla-hi abans d'entrenar i, si continua, que ho miri el fisio.` });
   for (const v of gp) out.push({ level: "bad", text: `${firstName(v.p.name)}: ${v.growthPain}` });
   if (heavy.length) out.push({ level: "warn", text: es ? `${list(heavy, lang)} ${one(heavy) ? "ha acumulado" : "han acumulado"} mucha m\xE1s carga que su media del mes. Haz una sesi\xF3n m\xE1s suave o con menos minutos.` : `${list(heavy, lang)} ${one(heavy) ? "ha acumulat" : "han acumulat"} molta m\xE9s c\xE0rrega que la seva mitjana del mes. Fes una sessi\xF3 m\xE9s suau o amb menys minuts.` });
-  if (fast.length) out.push({ level: "warn", text: es ? `${list(fast, lang)} ${one(fast) ? "ha crecido" : "han crecido"} muy deprisa desde la \xFAltima medici\xF3n. Puede notarse m\xE1s descoordinaci\xF3n.` : `${list(fast, lang)} ${one(fast) ? "ha crescut" : "han crescut"} molt de pressa des de l'\xFAltima mesura. Es pot notar m\xE9s descoordinaci\xF3.` });
+  if (fast.length) out.push({ level: "warn", text: es ? `${list(fast, lang)} ${one(fast) ? "crece" : "crecen"} m\xE1s de ${fmt(FAST_GROWTH)} cm/a\xF1o. Es cuando m\xE1s se lesionan por crecimiento: menos saltos y vigila rodillas y talones.` : `${list(fast, lang)} ${one(fast) ? "creix" : "creixen"} m\xE9s de ${fmt(FAST_GROWTH)} cm/any. \xC9s quan m\xE9s es lesionen pel creixement: menys salts i vigila genolls i talons.` });
+  if (sleepy.length) out.push({ level: "warn", text: es ? `${list(sleepy, lang)} ${one(sleepy) ? "duerme" : "duermen"} menos de 8 horas desde hace dos semanas. Dormir poco aumenta el riesgo de lesi\xF3n: com\xE9ntalo tambi\xE9n con la familia.` : `${list(sleepy, lang)} ${one(sleepy) ? "dorm" : "dormen"} menys de 8 hores des de fa dues setmanes. Dormir poc augmenta el risc de lesi\xF3: comenta-ho tamb\xE9 amb la fam\xEDlia.` });
   if (lowW.length) out.push({ level: "warn", text: es ? `${list(lowW, lang)} ${one(lowW) ? "dice" : "dicen"} que se encuentra${one(lowW) ? "" : "n"} peor que otras semanas. Una charla corta puede ayudar.` : `${list(lowW, lang)} ${one(lowW) ? "diu que es troba" : "diuen que es troben"} pitjor que altres setmanes. Una conversa curta pot ajudar.` });
   if (due.length) out.push({ level: "info", text: es ? `Toca medir a ${list(due, lang)}: sin medidas recientes la fase de maduraci\xF3n queda desfasada.` : `Toca mesurar ${list(due, lang)}: sense mesures recents la fase de maduraci\xF3 queda desfasada.` });
   if (!out.some((o) => o.level !== "info")) out.push({ level: "ok", text: es ? "Semana tranquila: ning\xFAn aviso importante en el equipo." : "Setmana tranquil\xB7la: cap av\xEDs important a l'equip." });
@@ -185,6 +245,29 @@ function list(vs, lang) {
   const n = vs.map((v) => firstName(v.p.name));
   if (n.length === 1) return n[0];
   return n.slice(0, -1).join(", ") + (lang === "es" ? " y " : " i ") + n[n.length - 1];
+}
+
+// src/lib/warmup.ts
+var WARMUP_GOAL = 2;
+function warmupStats(dates, today, n = 4) {
+  const weeks = Array.from({ length: n }, (_, i) => {
+    const from = (n - 1 - i) * 7;
+    return dates.filter((d) => {
+      const x = daysBetween(d, today);
+      return x >= from && x < from + 7;
+    }).length;
+  });
+  const avg = weeks.reduce((a, b) => a + b, 0) / n;
+  const level = avg >= WARMUP_GOAL ? "ok" : avg >= 1 ? "warn" : "bad";
+  return { weeks, avg, last: weeks[n - 1], level, any: dates.length > 0 };
+}
+function warmupLine(dates, today, lang) {
+  if (!dates?.length) return null;
+  const s = warmupStats(dates, today);
+  const es = lang === "es";
+  const avg = s.avg.toLocaleString("es-ES", { maximumFractionDigits: 1 });
+  if (s.level === "ok") return { level: "ok", text: es ? `Calentamiento de prevenci\xF3n: ${avg} por semana de media. Buen ritmo, es lo que protege.` : `Escalfament de prevenci\xF3: ${avg} per setmana de mitjana. Bon ritme, \xE9s el que protegeix.` };
+  return { level: "warn", text: es ? `Calentamiento de prevenci\xF3n: solo ${avg} por semana de media. Para que proteja hacen falta ${WARMUP_GOAL} o m\xE1s.` : `Escalfament de prevenci\xF3: nom\xE9s ${avg} per setmana de mitjana. Perqu\xE8 protegeixi en calen ${WARMUP_GOAL} o m\xE9s.` };
 }
 
 // src/lib/survey.ts
@@ -255,6 +338,12 @@ function conclusions(players, weeks, week, lang) {
   const [strong, strongV] = avg[avg.length - 1];
   if (weakV < 3.5) out.push({ level: weakV < 3 ? "bad" : "warn", text: `${es ? "El punto m\xE1s flojo del equipo es" : "El punt m\xE9s fluix de l\u2019equip \xE9s"} ${es ? "el" : "el"} ${dimName(weak, lang)} (${fmt(weakV)}/5): ${DIM_TIP[lang][weak]}.` });
   if (strongV >= 4) out.push({ level: "ok", text: `${es ? "Lo mejor" : "El millor"}: ${dimName(strong, lang)} (${fmt(strongV)}/5).` });
+  const slept = done.map((p) => ({ p, h: answerOf(p, week).sleepHours })).filter((x) => !!x.h);
+  if (slept.length) {
+    const short = slept.filter((x) => x.h < 8);
+    const avgH = fmt(mean(slept.map((x) => x.h)));
+    out.push({ level: short.length > slept.length / 3 ? "warn" : "ok", text: (es ? `Duermen ${avgH} h de media.` : `Dormen ${avgH} h de mitjana.`) + (short.length ? es ? ` Menos de 8 h: ${short.map((x) => `${x.p.name} (${fmt(x.h)} h)`).join(", ")}. A estas edades se recomiendan 8\u201310 h.` : ` Menys de 8 h: ${short.map((x) => `${x.p.name} (${fmt(x.h)} h)`).join(", ")}. A aquestes edats es recomanen 8\u201310 h.` : "") });
+  }
   for (const p of done) {
     const w = answerOf(p, week);
     if (w.pain) {
@@ -311,7 +400,8 @@ function weeklyEmail(teams, coach, appUrl, today) {
     const notes = conclusions(team.players, weeks, week, "ca").filter((c) => c.level === "bad" || c.level === "warn").slice(0, 8);
     const answered = team.players.filter((p) => p.wellness.some((w) => w.week === week)).length;
     const sessions = team.players.reduce((a, p) => a + loadView(p.loads, today).sessions, 0);
-    blocks.push({ team, summary: mondaySummary(views, "ca"), notes, answered, sessions });
+    const wl = warmupLine(team.warmups, today, "ca");
+    blocks.push({ team, summary: [...mondaySummary(views, "ca"), ...wl ? [wl] : []], notes, answered, sessions });
   }
   if (!blocks.length) return null;
   const alerts = blocks.reduce((a, b) => a + b.summary.filter((s) => s.level === "bad" || s.level === "warn").length, 0);
@@ -341,7 +431,7 @@ var weekLabel = (iso) => {
   const [, m, d] = iso.split("-");
   return `${+d}/${+m}`;
 };
-function assembleTeams({ teams, players, measures, wellness, injuries, loads }) {
+function assembleTeams({ teams, players, measures, wellness, injuries, loads, warmups = [] }) {
   const byPlayer = (rows, map) => {
     const out = /* @__PURE__ */ new Map();
     for (const r of rows) {
@@ -358,6 +448,7 @@ function assembleTeams({ teams, players, measures, wellness, injuries, loads }) 
     legs: num(r.legs),
     stress: num(r.stress),
     mood: num(r.mood),
+    sleepHours: r.sleep_hours == null ? void 0 : num(r.sleep_hours),
     pain: r.pain_zone ? { zone: r.pain_zone, level: num(r.pain_level), side: r.pain_side ?? "", stopped: !!r.pain_stopped } : null,
     comment: r.comment || void 0
   }));
@@ -370,6 +461,7 @@ function assembleTeams({ teams, players, measures, wellness, injuries, loads }) 
     coach: t.coach,
     survey_token: t.survey_token,
     owner: t.owner,
+    warmups: warmups.filter((w) => w.team_id === t.id).map((w) => w.date).sort(),
     players: players.filter((p) => p.team_id === t.id).map((p) => ({
       id: p.id,
       name: p.name,
