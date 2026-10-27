@@ -1,8 +1,9 @@
-import type { Injury, Player, Team, Wellness } from './data'
+import type { Injury, Load, Team, Wellness } from './data'
+import { assembleTeams } from './rows'
 import type { Measure, Sex } from './phv'
 import { supabase } from './supabase'
 
-export interface Profile { club_name: string; town: string; coach_name: string }
+export interface Profile { club_name: string; town: string; coach_name: string; weekly_email?: boolean }
 export interface DbTeam extends Team { survey_token: string }
 export interface PlayerInput { name: string; sex: Sex; dob: string; father: number | null; mother: number | null }
 
@@ -10,20 +11,18 @@ const sb = () => {
   if (!supabase) throw new Error('Supabase no configurat')
   return supabase
 }
-const num = (v: unknown) => (v === null || v === undefined ? NaN : Number(v))
 const check = <T,>(r: { data: T; error: { message: string } | null }) => {
   if (r.error) throw new Error(r.error.message)
   return r.data
 }
 
-/** Etiqueta curta d/m per a una data ISO. */
-export const weekLabel = (iso: string) => { const [, m, d] = iso.split('-'); return `${+d}/${+m}` }
+export { weekLabel } from './rows'
 
 export async function loadProfile(): Promise<Profile | null> {
   const { data: u } = await sb().auth.getUser()
   if (!u.user) return null
-  const r = await sb().from('profiles').select('club_name, town, coach_name').eq('id', u.user.id).maybeSingle()
-  return check(r)
+  const r = check(await sb().from('profiles').select('*').eq('id', u.user.id).maybeSingle()) as Record<string, unknown> | null
+  return r && { club_name: r.club_name as string, town: r.town as string, coach_name: r.coach_name as string, weekly_email: r.weekly_email as boolean | undefined }
 }
 
 export async function saveProfile(p: Profile) {
@@ -32,35 +31,17 @@ export async function saveProfile(p: Profile) {
 }
 
 export async function loadTeams(): Promise<DbTeam[]> {
-  const [teams, players, measures, wellness, injuries] = await Promise.all([
+  const [teams, players, measures, wellness, injuries, loads] = await Promise.all([
     sb().from('teams').select('*').order('created_at'),
     sb().from('players').select('*').order('name'),
     sb().from('measures').select('*').order('date'),
     sb().from('wellness').select('*').order('week'),
     sb().from('injuries').select('*').order('date', { ascending: false }),
+    // Si la taula de càrrega encara no existeix, l'app continua funcionant sense.
+    sb().from('loads').select('*').gte('date', new Date(Date.now() - 70 * 864e5).toISOString().slice(0, 10)).order('date').then((r) => (r.error ? { data: [], error: null } : r)),
   ]).then((rs) => rs.map(check) as Record<string, unknown>[][])
 
-  const byPlayer = <T,>(rows: Record<string, unknown>[], map: (r: Record<string, unknown>) => T) => {
-    const out = new Map<string, T[]>()
-    for (const r of rows) { const k = r.player_id as string; out.set(k, [...(out.get(k) ?? []), map(r)]) }
-    return out
-  }
-  const ms = byPlayer<Measure>(measures, (r) => ({ date: r.date as string, height: num(r.height), sitting: num(r.sitting), mass: num(r.mass) }))
-  const ws = byPlayer<Wellness>(wellness, (r) => ({
-    week: weekLabel(r.week as string), energy: num(r.energy), sleep: num(r.sleep), legs: num(r.legs), stress: num(r.stress), mood: num(r.mood),
-    pain: r.pain_zone ? { zone: r.pain_zone as string, level: num(r.pain_level), side: (r.pain_side as string) ?? '', stopped: !!r.pain_stopped } : null,
-    comment: (r.comment as string) || undefined,
-  }))
-  const is = byPlayer<Injury & { id: string }>(injuries, (r) => ({ id: r.id as string, date: r.date as string, zone: r.zone as string, note: r.note as string, status: r.status as Injury['status'] }))
-
-  return teams.map((t) => ({
-    id: t.id as string, name: t.name as string, sport: t.sport as string, coach: t.coach as string, survey_token: t.survey_token as string,
-    players: players.filter((p) => p.team_id === t.id).map((p): Player => ({
-      id: p.id as string, name: p.name as string, sex: p.sex as Sex, dob: p.dob as string,
-      father: num(p.father), mother: num(p.mother),
-      measures: ms.get(p.id as string) ?? [], wellness: (ws.get(p.id as string) ?? []).slice(-8), injuries: is.get(p.id as string) ?? [],
-    })),
-  }))
+  return assembleTeams({ teams, players, measures, wellness, injuries, loads })
 }
 
 export async function createTeam(t: { name: string; coach: string }) {
@@ -98,6 +79,16 @@ export async function addInjury(playerId: string, i: Injury) {
 }
 export async function setInjuryStatus(id: string, status: Injury['status']) {
   check(await sb().from('injuries').update({ status }).eq('id', id))
+}
+
+/** Desa o actualitza la càrrega d'una sessió (una fila per jugadora, data i tipus). */
+export async function saveLoads(rows: { playerId: string; load: Load }[]) {
+  check(await sb().from('loads').upsert(rows.map((r) => ({ player_id: r.playerId, date: r.load.date, kind: r.load.kind, minutes: r.load.minutes, rpe: r.load.rpe })), { onConflict: 'player_id,date,kind' }))
+}
+
+export async function submitLoad(token: string, player: string, l: Omit<Load, 'id'>) {
+  const ok = check(await sb().rpc('submit_load', { token, player, day: l.date, kind: l.kind, minutes: l.minutes, rpe: l.rpe }))
+  if (!ok) throw new Error('invalid')
 }
 
 export interface SurveyTeam { team: string; players: { id: string; name: string }[] }

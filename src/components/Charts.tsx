@@ -170,3 +170,30 @@ export function WellnessChart({ values, weeks, pain, painLabel }: { values: numb
     </svg>
   )
 }
+
+/** Barres de càrrega setmanal. L'última setmana pren el color de l'avís; la resta, neutre. */
+export function WeekBars({ values, level, labels, unit, big }: { values: number[]; level: 'ok' | 'warn' | 'bad'; labels?: string[]; unit: string; big?: boolean }) {
+  const max = Math.max(...values, 1)
+  const color = (i: number) => (i === values.length - 1 ? (level === 'ok' ? 'var(--accent)' : LV[level]) : 'var(--line)')
+  if (big) return (
+    <div className="grid gap-1.5" role="img" aria-label={`${values.map((v) => Math.round(v)).join(', ')} ${unit}`} style={{ gridTemplateColumns: `repeat(${values.length}, minmax(0, 1fr))` }}>
+      {values.map((v, i) => (
+        <div key={i} className="grid gap-1 justify-items-center content-end h-[150px]">
+          <span className="font-mono text-[12px] muted num">{Math.round(v)}</span>
+          <div className="w-full max-w-[72px] rounded-md" style={{ height: `${Math.max(v > 0 ? 2 : 0, (v / max) * 110)}px`, background: color(i) }} />
+          {labels && <span className="text-[12px] muted">{labels[i]}</span>}
+        </div>
+      ))}
+    </div>
+  )
+  const w = 96, h = 28, gap = 3
+  const bw = (w - gap * (values.length - 1)) / values.length
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} role="img" aria-label={`${values.map((v) => Math.round(v)).join(', ')} ${unit}`}>
+      {values.map((v, i) => {
+        const bh = Math.max(v > 0 ? 2 : 0, (v / max) * h)
+        return <rect key={i} x={i * (bw + gap)} y={h - bh} width={bw} height={bh} rx={1.5} fill={color(i)} />
+      })}
+    </svg>
+  )
+}

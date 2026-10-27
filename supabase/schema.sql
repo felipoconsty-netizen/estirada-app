@@ -136,3 +136,42 @@ grant execute on function survey_team(uuid) to anon, authenticated;
 grant execute on function submit_survey(uuid, uuid, int, int, int, int, int, text, int, text, boolean, text) to anon, authenticated;
 
 grant select, insert, update, delete on profiles, teams, players, measures, wellness, injuries to authenticated;
+
+-- Càrrega d'entrenament (sRPE): minuts × esforç percebut (1–10) de cada sessió.
+create table if not exists loads (
+  id uuid primary key default gen_random_uuid(),
+  owner uuid not null default auth.uid() references auth.users on delete cascade,
+  player_id uuid not null references players on delete cascade,
+  date date not null,
+  kind text not null default 'entreno' check (kind in ('entreno', 'partit')),
+  minutes smallint not null check (minutes between 1 and 300),
+  rpe smallint not null check (rpe between 1 and 10),
+  created_at timestamptz not null default now(),
+  unique (player_id, date, kind)
+);
+create index if not exists loads_player on loads (player_id);
+alter table loads enable row level security;
+drop policy if exists own on loads;
+create policy own on loads for all using (owner = auth.uid())
+  with check (owner = auth.uid() and exists (select 1 from players p where p.id = player_id and p.owner = auth.uid()));
+grant select, insert, update, delete on loads to authenticated;
+
+-- Les jugadores apunten l'esforç amb l'enllaç de l'equip (avui o els dos dies anteriors).
+create or replace function submit_load(token uuid, player uuid, day date, kind text, minutes int, rpe int)
+returns boolean language plpgsql security definer set search_path = public as $$
+#variable_conflict use_column
+declare o uuid; today date := (now() at time zone 'Europe/Madrid')::date;
+begin
+  if submit_load.day not between today - 2 and today or submit_load.kind not in ('entreno', 'partit') then return false; end if;
+  select p.owner into o from players p join teams t on t.id = p.team_id where p.id = submit_load.player and t.survey_token = submit_load.token;
+  if o is null then return false; end if;
+  insert into loads (owner, player_id, date, kind, minutes, rpe)
+  values (o, submit_load.player, submit_load.day, submit_load.kind, submit_load.minutes, submit_load.rpe)
+  on conflict (player_id, date, kind) do update set minutes = excluded.minutes, rpe = excluded.rpe, created_at = now();
+  return true;
+end $$;
+revoke all on function submit_load(uuid, uuid, date, text, int, int) from public;
+grant execute on function submit_load(uuid, uuid, date, text, int, int) to anon, authenticated;
+
+-- Resum de dilluns per correu (es pot desactivar al perfil).
+alter table profiles add column if not exists weekly_email boolean not null default true;

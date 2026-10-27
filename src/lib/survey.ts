@@ -1,5 +1,5 @@
 import type { Player, Wellness } from './data'
-import { fmt, wellnessScore, type Level } from './derive'
+import { fmt, growthPain, phaseNow, wellnessScore, type Level } from './derive'
 import { zone } from './i18n'
 import type { Lang } from './phv'
 
@@ -47,6 +47,12 @@ export function surveyWeeks(players: Player[], current: string) {
     .sort((a, b) => key(a) - key(b))
 }
 
+/** Setmana del qüestionari (el seu dilluns) com a etiqueta d/m. Es respon en diumenge, així que de dilluns a dissabte encara es mira la setmana anterior. */
+export function mondayLabel(iso: string) {
+  const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() - 6); d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
+  return `${d.getDate()}/${d.getMonth() + 1}`
+}
+
 export const answerOf = (p: Player, week: string) => p.wellness.find((w) => w.week === week)
 
 /** Conclusions automàtiques d'una setmana del qüestionari: participació, mitjanes, qui necessita atenció i per què. */
@@ -87,6 +93,9 @@ export function conclusions(players: Player[], weeks: string[], week: string, la
     if (w.pain) {
       let streak = 0
       for (let j = i; j >= 0 && answerOf(p, weeks[j])?.pain; j--) streak++
+      const phase = phaseNow(p)
+      const gp = phase ? growthPain(phase.key, w.pain.zone, lang) : null
+      if (gp) out.push({ level: w.pain.level >= 4 || w.pain.stopped || streak >= 2 ? 'bad' : 'warn', text: `${p.name} (${phase!.label[lang].toLowerCase()}): ${gp}` })
       out.push({
         level: w.pain.level >= 4 || w.pain.stopped ? 'bad' : 'warn',
         text: `${p.name}: ${es ? 'dolor de' : 'dolor de'} ${painText(w.pain, lang)}` + (w.pain.stopped ? (es ? ', no ha podido entrenar' : ', no ha pogut entrenar') : '') + (streak >= 2 ? ` · ${streak} ${es ? 'semanas seguidas' : 'setmanes seguides'}` : '') + `. ${es ? 'Revisar antes de entrenar.' : 'Revisa-ho abans d’entrenar.'}`,
