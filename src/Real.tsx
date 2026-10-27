@@ -129,40 +129,51 @@ function Signed({ lang, setLang, email }: { lang: Lang; setLang: (l: Lang) => vo
   const [err, setErr] = useState('')
   const [view, setView] = useState<'app' | 'privacy'>('app')
   const [editProfile, setEditProfile] = useState(false)
+  const [staff, setStaff] = useState<db.Staff[]>([])
+  const [ownerClub, setOwnerClub] = useState<db.Profile | null>(null)
 
   const reload = useCallback(async () => {
-    try { setTeams(await db.loadTeams()) } catch (e) { setErr((e as Error).message) }
+    try { const [ts, st] = await Promise.all([db.loadTeams(), db.loadStaff()]); setTeams(ts); setStaff(st) } catch (e) { setErr((e as Error).message) }
   }, [])
   useEffect(() => { db.loadProfile().then(setProfile).catch((e) => setErr(e.message)); reload() }, [reload])
+
+  // Equip tècnic convidat: no té equips propis, entra als del titular que li ha donat accés.
+  const guest = !!teams?.length && !teams.some((x) => x.role === 'owner')
+  const guestOwner = guest ? teams![0].owner : ''
+  useEffect(() => { if (guestOwner) db.loadClub(guestOwner).then(setOwnerClub).catch(() => setOwnerClub(null)) }, [guestOwner])
 
   const wrap = <A extends unknown[]>(fn: (...a: A) => Promise<void>) => async (...a: A) => { await fn(...a); await reload() }
   const logout = () => supabase!.auth.signOut()
 
   if (err) return <Shell lang={lang} setLang={setLang}><div className="card p-6 grid gap-3"><p className="tx-bad">{t.error}</p><p className="font-mono text-[12px] muted">{err}</p><button className="btn-ghost" onClick={logout}>{t.logout}</button></div></Shell>
   if (profile === undefined || teams === null) return <Loading lang={lang} />
-  if (!profile) return <Onboarding lang={lang} setLang={setLang} done={async (p, team) => { await db.saveProfile(p); await db.createTeam({ name: team, coach: p.coach_name }); setProfile(p); await reload() }} />
+  if (!profile && !guest) return <Onboarding lang={lang} setLang={setLang} done={async (p, team) => { await db.saveProfile(p); await db.createTeam({ name: team, coach: p.coach_name }); setProfile(p); await reload() }} />
 
+  const club = guest ? ownerClub ?? { club_name: '', town: '', coach_name: '' } : profile!
+  const myRole = guest ? [...new Set(teams.map((x) => x.role!))] : []
+  const canManage = !guest || teams.some((x) => x.role === 'director' || x.role === 'entrenador')
   const account = (
     <details className="relative">
-      <summary className="list-none cursor-pointer w-8 h-8 rounded-full grid place-items-center text-[13px] font-semibold" style={{ background: 'var(--surface-2)' }} aria-label={t.settings}>{(profile.coach_name || email)[0]?.toUpperCase()}</summary>
+      <summary className="list-none cursor-pointer w-8 h-8 rounded-full grid place-items-center text-[13px] font-semibold" style={{ background: 'var(--surface-2)' }} aria-label={t.settings}>{(profile?.coach_name || email)[0]?.toUpperCase()}</summary>
       <div className="card absolute right-0 mt-2 p-4 grid gap-2 w-[240px] z-20 text-[13.5px]">
-        <div className="font-medium">{profile.coach_name}</div>
+        {profile?.coach_name && <div className="font-medium">{profile.coach_name}</div>}
         <div className="muted break-all">{email}</div>
-        <button className="btn-ghost justify-center mt-1" onClick={(e) => { (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; setEditProfile(true) }}>{t.edit_profile}</button>
+        {guest && <div className="text-[12.5px]">{t.staff_as} <b>{myRole.map((r) => t[`role_${r}` as const]).join(' / ')}</b>{club.club_name && ` · ${club.club_name}`}</div>}
+        {profile && <button className="btn-ghost justify-center mt-1" onClick={(e) => { (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; setEditProfile(true) }}>{t.edit_profile}</button>}
         <button className="btn-ghost justify-center" onClick={(e) => { (e.currentTarget.closest('details') as HTMLDetailsElement).open = false; setView('privacy') }}>{t.privacy}</button>
         <button className="btn-ghost justify-center" onClick={logout}>{t.logout}</button>
       </div>
     </details>
   )
 
-  if (view === 'privacy') return <Consent lang={lang} setLang={setLang} club={profile.club_name} back={() => setView('app')} />
+  if (view === 'privacy') return <Consent lang={lang} setLang={setLang} club={club.club_name} back={() => setView('app')} />
 
   return (
     <>
-    {editProfile && <ProfileSheet t={t} value={profile} onClose={() => setEditProfile(false)} onSave={async (p) => { await db.saveProfile(p); setProfile(p); setEditProfile(false) }} />}
-    <Workspace demo={false} teams={teams} club={{ name: profile.club_name, town: profile.town }} today={todayISO()} lang={lang} setLang={setLang} account={account}
+    {editProfile && profile && <ProfileSheet t={t} value={profile} onClose={() => setEditProfile(false)} onSave={async (p) => { await db.saveProfile(p); setProfile(p); setEditProfile(false) }} />}
+    <Workspace demo={false} teams={teams} club={{ name: club.club_name, town: club.town }} today={todayISO()} lang={lang} setLang={setLang} account={account}
       actions={{ saveMeasure: wrap(db.saveMeasure), addInjury: wrap(db.addInjury), setInjuryStatus: wrap(db.setInjuryStatus), newSurveyLink: wrap(db.newSurveyLink), deleteMeasure: wrap(db.deleteMeasure), saveLoads: wrap(db.saveLoads), setWarmup: wrap(db.setWarmup) }}
-      manage={({ t, lang, teams, toast }) => <Manage t={t} lang={lang} teams={teams} profile={profile} toast={toast} reload={reload} />} />
+      manage={canManage ? ({ t, lang, teams, toast }) => <Manage t={t} lang={lang} teams={teams} profile={club} toast={toast} reload={reload} guest={guest} staff={staff} email={email} /> : undefined} />
     </>
   )
 }
@@ -235,7 +246,8 @@ function Onboarding({ lang, setLang, done }: { lang: Lang; setLang: (l: Lang) =>
 
 const emptyPlayer: db.PlayerInput = { name: '', sex: 'F', dob: '', father: null, mother: null }
 
-function Manage({ t, lang, teams, profile, toast, reload }: { t: Dict; lang: Lang; teams: Team[]; profile: db.Profile; toast: (s: string) => void; reload: () => Promise<void> }) {
+function Manage({ t, lang, teams: all, profile, toast, reload, guest, staff, email }: { t: Dict; lang: Lang; teams: Team[]; profile: db.Profile; toast: (s: string) => void; reload: () => Promise<void>; guest: boolean; staff: db.Staff[]; email: string }) {
+  const teams = all.filter((x) => x.role !== 'fisio')
   const [editTeam, setEditTeam] = useState<{ id?: string; name: string; coach: string } | null>(null)
   const [editPlayer, setEditPlayer] = useState<{ teamId: string; id?: string; v: db.PlayerInput } | null>(null)
   const [importTo, setImportTo] = useState<Team | null>(null)
@@ -248,7 +260,7 @@ function Manage({ t, lang, teams, profile, toast, reload }: { t: Dict; lang: Lan
     <div className="grid gap-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="grid gap-1"><div className="label">{profile.club_name}</div><h1 className="font-display text-[34px] md:text-[40px] font-bold leading-none">{t.teams_title}</h1></div>
-        <button className="btn" onClick={() => setEditTeam({ name: '', coach: profile.coach_name })}>+ {t.add_team}</button>
+        {!guest && <button className="btn" onClick={() => setEditTeam({ name: '', coach: profile.coach_name })}>+ {t.add_team}</button>}
       </div>
 
       {editTeam && (
@@ -271,7 +283,7 @@ function Manage({ t, lang, teams, profile, toast, reload }: { t: Dict; lang: Lan
               <button className="btn-ghost" onClick={() => setEditTeam({ id: tm.id, name: tm.name, coach: tm.coach })}>{t.edit}</button>
               <button className="btn-ghost" onClick={() => setImportTo(tm)}>{t.import_excel}</button>
               {tm.players.length > 0 && <button className="btn-ghost" onClick={() => downloadCsv(tm, t)}>{t.export_csv}</button>}
-              <button className="btn-ghost tx-bad" onClick={() => confirm(t.confirm_delete_team) && act(() => db.deleteTeam(tm.id))}>{t.delete}</button>
+              {tm.role === 'owner' && <button className="btn-ghost tx-bad" onClick={() => confirm(t.confirm_delete_team) && act(() => db.deleteTeam(tm.id))}>{t.delete}</button>}
             </div>
           </div>
 
@@ -304,7 +316,60 @@ function Manage({ t, lang, teams, profile, toast, reload }: { t: Dict; lang: Lan
           )}
         </section>
       ))}
+
+      {!guest && <StaffSection t={t} teams={teams.filter((x) => x.role === 'owner')} club={profile.club_name} staff={staff.filter((s) => s.email !== email)} email={email} act={act} toast={toast} />}
     </div>
+  )
+}
+
+/** Equip tècnic: el titular dona accés per correu a director, entrenadors/ajudants i fisio. */
+function StaffSection({ t, teams, club, staff, email, act, toast }: { t: Dict; teams: Team[]; club: string; staff: db.Staff[]; email: string; act: (fn: () => Promise<void>, ok?: string) => Promise<void>; toast: (s: string) => void }) {
+  const [f, setF] = useState<{ email: string; role: db.Staff['role']; team: string }>({ email: '', role: 'entrenador', team: '' })
+  const [err, setErr] = useState('')
+  const invite = (s: { email: string; role: db.Staff['role'] }) => t.staff_invite.replace('{club}', club).replace('{role}', t[`role_${s.role}`].toLowerCase()).replace('{url}', location.origin).replace('{email}', s.email)
+  const teamName = (id: string | null) => (id ? teams.find((x) => x.id === id)?.name ?? '—' : t.staff_all)
+  const copy = async (s: db.Staff) => { try { await navigator.clipboard.writeText(invite(s)); toast(t.staff_copied) } catch { prompt(t.staff_copy, invite(s)) } }
+  return (
+    <section className="card p-5 grid gap-4">
+      <div className="grid gap-1"><h2 className="font-display text-[22px] font-bold">{t.staff_title}</h2><p className="muted text-[14px] max-w-[680px]">{t.staff_sub}</p></div>
+      <form className="grid gap-3 sm:grid-cols-[1.4fr_1fr_1fr_auto] items-end" onSubmit={(e) => {
+        e.preventDefault()
+        const mail = f.email.trim().toLowerCase()
+        if (!/^\S+@\S+\.\S+$/.test(mail)) return setErr(t.staff_bad_email)
+        if (mail === email) return setErr(t.staff_self)
+        setErr('')
+        act(() => db.addStaff({ email: mail, role: f.role, team_id: f.team || null })).then(() => setF({ ...f, email: '' }))
+      }}>
+        <label className="field"><span className="text-[13px] font-medium">{t.staff_email}</span><input type="email" required placeholder="nom@club.cat" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></label>
+        <label className="field"><span className="text-[13px] font-medium">{t.staff_role}</span>
+          <select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value as db.Staff['role'], team: e.target.value === 'director' ? '' : f.team })}>
+            {(['director', 'entrenador', 'fisio'] as const).map((r) => <option key={r} value={r}>{t[`role_${r}`]}</option>)}
+          </select></label>
+        <label className="field"><span className="text-[13px] font-medium">{t.staff_team}</span>
+          <select value={f.team} disabled={f.role === 'director'} onChange={(e) => setF({ ...f, team: e.target.value })}>
+            <option value="">{t.staff_all}</option>
+            {teams.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select></label>
+        <button className="btn" type="submit">+ {t.staff_add}</button>
+      </form>
+      <p className="text-[12.5px] muted">{t.role_help}</p>
+      {err && <p className="tx-bad text-[14px]">{err}</p>}
+      {staff.length === 0 ? <p className="muted text-[14px]">{t.staff_none}</p> : (
+        <ul className="grid gap-2">
+          {staff.map((s) => (
+            <li key={s.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-2 line-b text-[14px]">
+              <span className="font-medium break-all">{s.email}</span>
+              <span className="muted">{t[`role_${s.role}`]} · {teamName(s.team_id)}</span>
+              <span className="ml-auto flex flex-wrap gap-3">
+                <button className="text-[13px] underline" onClick={() => copy(s)}>{t.staff_copy}</button>
+                <a className="text-[13px] underline" href={`https://wa.me/?text=${encodeURIComponent(invite(s))}`} target="_blank" rel="noreferrer">{t.staff_whatsapp}</a>
+                <button className="text-[13px] underline tx-bad" onClick={() => confirm(t.staff_confirm_remove) && act(() => db.removeStaff(s.id))}>{t.staff_remove}</button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 
