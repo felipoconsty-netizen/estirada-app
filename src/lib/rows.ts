@@ -28,6 +28,7 @@ export function assembleTeams({ teams, players, measures, wellness, injuries, lo
 
   return teams.map((t) => ({
     id: t.id as string, name: t.name as string, sport: t.sport as string, coach: t.coach as string, survey_token: t.survey_token as string, owner: t.owner as string,
+    days: Array.isArray(t.training_days) ? (t.training_days as number[]).map(Number) : [],
     warmups: warmups.filter((w) => w.team_id === t.id).map((w) => w.date as string).sort(),
     players: players.filter((p) => p.team_id === t.id).map((p): Player => ({
       id: p.id as string, name: p.name as string, sex: p.sex as Sex, dob: p.dob as string,

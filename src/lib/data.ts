@@ -54,6 +54,7 @@ export interface Team {
   coach: string
   players: Player[]
   warmups?: string[] // dies (ISO) en què s'ha fet l'escalfament de prevenció
+  days?: number[] // dies d'entreno: 1 = dilluns … 7 = diumenge
   role?: Role // el meu rol en aquest equip (només a l'app real)
 }
 
@@ -189,13 +190,13 @@ const infantilM: Spec[] = [
 ]
 
 /** Escalfaments de prevenció de les últimes 5 setmanes: els dies d'entrenament (dl, dc, dj), amb el compliment que es demani. */
-function buildWarmups(rate: number, seed: number): string[] {
+function buildWarmups(rate: number, seed: number, days: number[]): string[] {
   const r = rng(seed)
   const out: string[] = []
   const end = new Date(TODAY + 'T12:00:00')
   for (let back = 35; back >= 0; back--) {
     const d = new Date(end); d.setDate(d.getDate() - back)
-    if ([1, 3, 4].includes(d.getDay()) && r() < rate) out.push(d.toISOString().slice(0, 10))
+    if (days.includes(((d.getDay() + 6) % 7) + 1) && r() < rate) out.push(d.toISOString().slice(0, 10))
   }
   return out
 }
@@ -203,7 +204,7 @@ function buildWarmups(rate: number, seed: number): string[] {
 export const CLUB = { name: 'CB Exemple', town: 'Granollers' }
 
 export const TEAMS: Team[] = [
-  { id: 'cadet-f', name: 'Cadet Femení A', sport: 'Bàsquet', coach: 'Entrenadora: Marta G.', players: cadetF.map((s, i) => build('F', s, 101 + i * 17)), warmups: buildWarmups(0.85, 7) },
-  { id: 'infantil-f', name: 'Infantil Femení', sport: 'Bàsquet', coach: 'Entrenador: Jordi P.', players: infantilF.map((s, i) => build('F', s, 501 + i * 13)), warmups: buildWarmups(0.45, 11) },
-  { id: 'infantil-m', name: 'Infantil Masculí', sport: 'Bàsquet', coach: 'Entrenador: Xavi R.', players: infantilM.map((s, i) => build('M', s, 901 + i * 11)), warmups: buildWarmups(0.2, 13) },
+  { id: 'cadet-f', name: 'Cadet Femení A', sport: 'Bàsquet', coach: 'Entrenadora: Marta G.', players: cadetF.map((s, i) => build('F', s, 101 + i * 17)), warmups: buildWarmups(0.85, 7, [1, 3, 4]), days: [1, 3, 4] },
+  { id: 'infantil-f', name: 'Infantil Femení', sport: 'Bàsquet', coach: 'Entrenador: Jordi P.', players: infantilF.map((s, i) => build('F', s, 501 + i * 13)), warmups: buildWarmups(0.45, 11, [2, 4]), days: [2, 4] },
+  { id: 'infantil-m', name: 'Infantil Masculí', sport: 'Bàsquet', coach: 'Entrenador: Xavi R.', players: infantilM.map((s, i) => build('M', s, 901 + i * 11)), warmups: buildWarmups(0.2, 13, [2, 5]), days: [2, 5] },
 ]

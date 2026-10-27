@@ -4,7 +4,8 @@ import { derive, deriveTeam, firstName, fmt, mondaySummary, phaseNow, signed, we
 import { DICT, zone, type Dict } from '@/lib/i18n'
 import { ageAt, birthQuarter, FAST_GROWTH, growthVelocity, maturityOffset, PAH_BANDS, phaseOf, RECOS, type Lang, type Measure } from '@/lib/phv'
 import { ORDER_LABEL, ORDER_LEVEL, ORDERS, todayPlan } from '@/lib/today'
-import { PARTS, PROGRAM, videoUrl, warmupLine, warmupStats, WARMUP_GOAL, type Part } from '@/lib/warmup'
+import { PARTS, PROGRAM, sessionsDone, videoUrl, warmupLine, warmupStats, WARMUP_GOAL, type Part } from '@/lib/warmup'
+import { isTrainingDay, lastSession, nextSession } from '@/lib/schedule'
 import { answerOf, conclusions, DIMS, mondayLabel, surveyWeeks } from '@/lib/survey'
 import { loadAlert, loadView, weeklyLabels, weeklyLoads } from '@/lib/load'
 import { InstallButton } from '@/components/Install'
@@ -195,6 +196,8 @@ function TodayScreen({ t, lang, today, teams, team, views, pickTeam, openPlayer,
   const warmed = (team.warmups ?? []).includes(today)
   const careful = plan.filter((r) => r.order === 'stop' || r.order === 'less').map((r) => firstName(r.v.p.name))
   const date = new Date(today + 'T12:00:00').toLocaleDateString(lang === 'es' ? 'es-ES' : 'ca-ES', { weekday: 'long', day: 'numeric', month: 'long' })
+  const rest = !!team.days?.length && !isTrainingDay(team.days, today)
+  const next = rest ? nextSession(team.days!, today, lang) : null
   return (
     <div className="grid gap-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -208,6 +211,9 @@ function TodayScreen({ t, lang, today, teams, team, views, pickTeam, openPlayer,
           <button className="btn-ghost" onClick={() => window.print()}>{t.today_print}</button>
         </div>
       </div>
+
+      {rest && <div className="card p-4 text-[14.5px]" style={{ background: 'var(--surface-2)' }}><b>{t.today_rest}</b> {next && (next.tomorrow ? t.today_next_tomorrow : t.today_next).replace('{day}', next.label)}</div>}
+      {!team.days?.length && <p className="text-[13.5px] muted no-print">{t.today_set_days}</p>}
 
       {team.players.length === 0 ? <Empty t={t} text={t.no_players} /> : <>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -273,7 +279,7 @@ function TeamPicker({ teams, team, pickTeam }: { teams: Team[]; team: Team; pick
 }
 
 function TeamView({ t, lang, demo, today, teams, team, views, pickTeam, openPlayer, openMeasure, goManage }: { t: Dict; lang: Lang; demo: boolean; today: string; teams: Team[]; team: Team; views: PlayerView[]; pickTeam: (id: string) => void; openPlayer: (id: string) => void; openMeasure: (id: string) => void; goManage?: () => void }) {
-  const wl = warmupLine(team.warmups, today, lang)
+  const wl = warmupLine(team.warmups, today, lang, team.days)
   const summary = [...mondaySummary(views, lang), ...(wl ? [wl] : [])]
   const thisWeek = mondayLabel(today)
   const answered = demo ? views.length - 1 : team.players.filter((p) => p.wellness.at(-1)?.week === thisWeek).length
@@ -849,7 +855,7 @@ function LoadScreen({ t, lang, demo, today, team, openPlayer, toast, onSave }: {
   const any = rows.some((r) => r.p.loads.length)
   const copy = async () => { try { await navigator.clipboard.writeText(link); toast(t.copied) } catch { toast(link) } }
 
-  const [date, setDate] = useState(today)
+  const [date, setDate] = useState(() => lastSession(team.days, today))
   const [kind, setKind] = useState<Load['kind']>('entreno')
   const [minutes, setMinutes] = useState('90')
   const [rpe, setRpe] = useState<Record<string, string>>({})
@@ -945,10 +951,11 @@ function LoadScreen({ t, lang, demo, today, team, openPlayer, toast, onSave }: {
 /* ───────────── Escalfament ───────────── */
 
 function WarmupScreen({ t, lang, today, team, views, onToggle }: { t: Dict; lang: Lang; today: string; team: Team; views: PlayerView[]; onToggle?: (date: string, done: boolean) => void }) {
-  const [date, setDate] = useState(today)
+  const [date, setDate] = useState(() => lastSession(team.days, today))
   const [level, setLevel] = useState(0)
   const dates = team.warmups ?? []
   const st = warmupStats(dates, today)
+  const ses = sessionsDone(dates, team.days, today)
   const done = dates.includes(date)
   const peak = views.filter((v) => v.phase.key === 'plena' || v.fast)
   const labels = weeklyLabels(today, 4)
@@ -984,7 +991,7 @@ function WarmupScreen({ t, lang, today, team, views, onToggle }: { t: Dict; lang
               ))}
             </div>
             <div className="grid grid-cols-4 gap-3 text-center text-[11.5px] muted font-mono">{labels.map((l) => <span key={l}>{l}</span>)}</div>
-            <p className="text-[14px]"><Chip level={st.level}>{t.warmup_avg.replace('{n}', fmt(st.avg))}</Chip> <span className="muted">{st.level === 'ok' ? t.warmup_ok : st.level === 'warn' ? t.warmup_warn : t.warmup_bad}</span></p>
+            <p className="text-[14px]"><Chip level={st.level}>{t.warmup_avg.replace('{n}', fmt(st.avg))}</Chip>{ses && <> <Chip level="info">{t.warmup_sessions.replace('{n}', String(ses.n)).replace('{m}', String(ses.m))}</Chip></>} <span className="muted">{st.level === 'ok' ? t.warmup_ok : st.level === 'warn' ? t.warmup_warn : t.warmup_bad}</span></p>
           </> : <p className="muted text-[14px]">{t.warmup_none}</p>}
         </section>
       </div>

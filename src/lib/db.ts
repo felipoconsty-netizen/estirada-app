@@ -76,11 +76,20 @@ export async function loadClub(owner: string): Promise<Profile | null> {
   return r
 }
 
-export async function createTeam(t: { name: string; coach: string }) {
-  check(await sb().from('teams').insert({ name: t.name, coach: t.coach }))
+export interface TeamInput { name: string; coach: string; days?: number[] }
+const teamRow = (t: TeamInput) => ({ name: t.name, coach: t.coach, ...(t.days ? { training_days: t.days } : {}) })
+const NO_DAYS = 'Falta la columna dels dies d’entreno: executa supabase/dies-entreno.sql al SQL Editor de Supabase.'
+// Si la base de dades encara no té dies d'entreno, desa la resta i avisa.
+const withDays = async (run: (row: ReturnType<typeof teamRow>) => PromiseLike<{ data: unknown; error: { message: string } | null }>, t: TeamInput) => {
+  const r = await run(teamRow(t))
+  if (r.error && /training_days/.test(r.error.message)) { check(await run(teamRow({ ...t, days: undefined }))); if (t.days?.length) throw new Error(NO_DAYS); return }
+  check(r)
 }
-export async function updateTeam(id: string, t: { name: string; coach: string }) {
-  check(await sb().from('teams').update(t).eq('id', id))
+export async function createTeam(t: TeamInput) {
+  await withDays((row) => sb().from('teams').insert(row), t)
+}
+export async function updateTeam(id: string, t: TeamInput) {
+  await withDays((row) => sb().from('teams').update(row).eq('id', id), t)
 }
 export async function deleteTeam(id: string) {
   check(await sb().from('teams').delete().eq('id', id))
