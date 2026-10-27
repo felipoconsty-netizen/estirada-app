@@ -15,7 +15,7 @@ import { normName, readTables, sheetsToPlayers, type ImportRow } from '@/lib/imp
 export default function Root() {
   const [lang, setLang] = useLang()
   const path = location.pathname
-  if (path.startsWith('/e/')) return <PublicSurvey token={path.slice(3).split('/')[0]} lang={lang} setLang={setLang} />
+  if (path.startsWith('/e/')) { const [token, mode] = path.slice(3).split('/'); return <PublicSurvey token={token} effort={mode === 'esforc'} lang={lang} setLang={setLang} /> }
   return <CoachApp lang={lang} setLang={setLang} />
 }
 
@@ -161,7 +161,7 @@ function Signed({ lang, setLang, email }: { lang: Lang; setLang: (l: Lang) => vo
     <>
     {editProfile && <ProfileSheet t={t} value={profile} onClose={() => setEditProfile(false)} onSave={async (p) => { await db.saveProfile(p); setProfile(p); setEditProfile(false) }} />}
     <Workspace demo={false} teams={teams} club={{ name: profile.club_name, town: profile.town }} today={todayISO()} lang={lang} setLang={setLang} account={account}
-      actions={{ saveMeasure: wrap(db.saveMeasure), addInjury: wrap(db.addInjury), setInjuryStatus: wrap(db.setInjuryStatus), newSurveyLink: wrap(db.newSurveyLink), deleteMeasure: wrap(db.deleteMeasure) }}
+      actions={{ saveMeasure: wrap(db.saveMeasure), addInjury: wrap(db.addInjury), setInjuryStatus: wrap(db.setInjuryStatus), newSurveyLink: wrap(db.newSurveyLink), deleteMeasure: wrap(db.deleteMeasure), saveLoads: wrap(db.saveLoads) }}
       manage={({ t, lang, teams, toast }) => <Manage t={t} lang={lang} teams={teams} profile={profile} toast={toast} reload={reload} />} />
     </>
   )
@@ -173,11 +173,12 @@ function ProfileSheet({ t, value, onSave, onClose }: { t: Dict; value: db.Profil
   const [err, setErr] = useState('')
   return (
     <div className="sheet-bg" role="dialog" aria-modal="true" aria-labelledby="prof-h" onClick={onClose}>
-      <form className="sheet grid gap-4" onClick={(e) => e.stopPropagation()} onSubmit={async (e) => { e.preventDefault(); setBusy(true); try { await onSave({ club_name: p.club_name.trim(), town: p.town.trim(), coach_name: p.coach_name.trim() }) } catch (x) { setErr((x as Error).message); setBusy(false) } }}>
+      <form className="sheet grid gap-4" onClick={(e) => e.stopPropagation()} onSubmit={async (e) => { e.preventDefault(); setBusy(true); try { await onSave({ club_name: p.club_name.trim(), town: p.town.trim(), coach_name: p.coach_name.trim(), weekly_email: p.weekly_email !== false }) } catch (x) { setErr((x as Error).message); setBusy(false) } }}>
         <h2 id="prof-h" className="font-display text-[20px] font-bold">{t.edit_profile}</h2>
         <label className="field"><span className="text-[13px] font-medium">{t.coach_name}</span><input required value={p.coach_name} onChange={(e) => setP({ ...p, coach_name: e.target.value })} /></label>
         <label className="field"><span className="text-[13px] font-medium">{t.club_name}</span><input required value={p.club_name} onChange={(e) => setP({ ...p, club_name: e.target.value })} /></label>
         <label className="field"><span className="text-[13px] font-medium">{t.town} <span className="faint">({t.optional})</span></span><input value={p.town} onChange={(e) => setP({ ...p, town: e.target.value })} /></label>
+        <label className="flex gap-2.5 items-start text-[14px]"><input type="checkbox" className="mt-1 w-4 h-4" checked={p.weekly_email !== false} onChange={(e) => setP({ ...p, weekly_email: e.target.checked })} /><span>{t.weekly_email}</span></label>
         {err && <p className="tx-bad text-[14px]">{err}</p>}
         <div className="flex gap-2"><button className="btn" disabled={busy}>{t.save_btn}</button><button className="btn-ghost" type="button" onClick={onClose}>{t.cancel}</button></div>
       </form>
@@ -441,9 +442,10 @@ function PlayerForm({ t, today, value, isNew, onSave, onCancel }: { t: Dict; tod
 
 const FACES = ['😫', '🙁', '😐', '🙂', '😄']
 
-function PublicSurvey({ token, lang, setLang }: { token: string; lang: Lang; setLang: (l: Lang) => void }) {
+function PublicSurvey({ token, effort, lang, setLang }: { token: string; effort: boolean; lang: Lang; setLang: (l: Lang) => void }) {
   const t = DICT[lang]
   const [info, setInfo] = useState<db.SurveyTeam | null | undefined>(undefined)
+  const [mode, setMode] = useState<'week' | 'effort'>(effort ? 'effort' : 'week')
   const [who, setWho] = useState('')
   const [pain, setPain] = useState<boolean | null>(null)
   const [zoneV, setZone] = useState('Genoll')
@@ -469,8 +471,10 @@ function PublicSurvey({ token, lang, setLang }: { token: string; lang: Lang; set
         <Logo /><span className="font-display font-bold">Estirada</span><span className="ml-auto mr-2 text-[12px] muted truncate">{info?.team}</span><InstallButton lang={lang} compact /><LangToggle lang={lang} setLang={setLang} />
       </header>
       <main className="mx-auto max-w-[480px] px-4 py-6">
+        {info && <div className="flex gap-2 mb-5" role="group">{(['week', 'effort'] as const).map((m) => <button key={m} type="button" className="pill flex-1" aria-pressed={mode === m} onClick={() => { setMode(m); history.replaceState(null, '', `/e/${token}${m === 'effort' ? '/esforc' : ''}`) }}>{m === 'week' ? t.mode_week : t.mode_effort}</button>)}</div>}
         {info === undefined ? <p className="muted">{t.loading}</p>
           : info === null ? <p className="card p-6">{t.invalid_link}</p>
+          : mode === 'effort' ? <EffortForm t={t} token={token} players={info.players} who={who} setWho={setWho} />
           : state === 'sent' ? (
             <div className="card p-6 grid gap-4 text-center">
               <div className="text-[44px]">✅</div>
@@ -517,5 +521,53 @@ function PublicSurvey({ token, lang, setLang }: { token: string; lang: Lang; set
         <p className="text-[12px] faint mt-8">{t.disclaimer_real}</p>
       </main>
     </div>
+  )
+}
+
+const localISO = (back = 0) => { const d = new Date(); d.setDate(d.getDate() - back); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10) }
+
+/** Esforç d'una sessió (sRPE), per a les jugadores després d'entrenar o jugar. */
+function EffortForm({ t, token, players, who, setWho }: { t: Dict; token: string; players: db.SurveyTeam['players']; who: string; setWho: (id: string) => void }) {
+  const [back, setBack] = useState(0)
+  const [kind, setKind] = useState<'entreno' | 'partit'>('entreno')
+  const [minutes, setMinutes] = useState('')
+  const [rpe, setRpe] = useState(0)
+  const [state, setState] = useState<'form' | 'sending' | 'sent' | 'error'>('form')
+  const mins = parseInt(minutes, 10)
+  const ready = who && rpe > 0 && mins > 0 && mins <= 300
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault(); if (!ready) return; setState('sending')
+    try { await db.submitLoad(token, who, { date: localISO(back), kind, minutes: mins, rpe }); setState('sent') } catch { setState('error') }
+  }
+  if (state === 'sent') return (
+    <div className="card p-6 grid gap-4 text-center">
+      <div className="text-[44px]">💪</div>
+      <p className="font-display text-[20px] font-bold">{t.effort_thanks}</p>
+      <button className="btn-ghost justify-self-center" onClick={() => { setWho(''); setRpe(0); setMinutes(''); setState('form') }}>{t.answer_again}</button>
+    </div>
+  )
+  return (
+    <form className="grid gap-5" onSubmit={submit}>
+      <h1 className="font-display text-[26px] font-bold">{t.effort_title}</h1>
+      <label className="field"><span className="text-[14px] font-medium">{t.who}</span>
+        <select required value={who} onChange={(e) => setWho(e.target.value)}><option value="">—</option>{players.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
+      </label>
+      <fieldset className="grid gap-2"><legend className="text-[14px] font-medium mb-2">{t.effort_when}</legend>
+        <div className="flex gap-2">{[[0, t.today_s], [1, t.yesterday]].map(([b, l]) => <button type="button" key={b} className="pill flex-1" aria-pressed={back === b} onClick={() => setBack(b as number)}>{l}</button>)}</div>
+        <div className="flex gap-2">{(['entreno', 'partit'] as const).map((k) => <button type="button" key={k} className="pill flex-1" aria-pressed={kind === k} onClick={() => setKind(k)}>{k === 'partit' ? t.kind_partit : t.kind_entreno}</button>)}</div>
+      </fieldset>
+      <fieldset className="grid gap-2"><legend className="text-[14px] font-medium mb-2">{t.effort_minutes}</legend>
+        <div className="flex flex-wrap gap-1.5">{['15', '30', '45', '60', '75', '90', '120'].map((m) => <button type="button" key={m} className="pill text-[13px]" aria-pressed={minutes === m} onClick={() => setMinutes(m)}>{m}</button>)}</div>
+        <input inputMode="numeric" aria-label={t.effort_minutes} className="border rounded-lg px-3 py-2" style={{ borderColor: 'var(--line)', background: 'var(--surface)' }} value={minutes} onChange={(e) => setMinutes(e.target.value.replace(/\D/g, ''))} />
+      </fieldset>
+      <fieldset className="grid gap-2"><legend className="text-[14px] font-medium mb-2">{t.effort_q}</legend>
+        <div className="grid grid-cols-5 gap-1.5">{Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+          <button type="button" key={n} className="scale-btn font-mono" aria-pressed={rpe === n} aria-label={`${n} · ${t.rpe_labels[n]}`} onClick={() => setRpe(n)}>{n}</button>
+        ))}</div>
+        <p className="text-[14px] text-center min-h-[1.4em] font-medium">{rpe ? t.rpe_labels[rpe] : ''}</p>
+      </fieldset>
+      {state === 'error' && <p className="tx-bad text-[14px]">{t.error}</p>}
+      <button className="btn justify-center" type="submit" disabled={!ready || state === 'sending'} style={!ready ? { opacity: 0.5 } : undefined}>{t.send}</button>
+    </form>
   )
 }

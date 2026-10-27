@@ -24,6 +24,15 @@ export interface Injury {
   status: 'oberta' | 'tancada'
 }
 
+/** Sessió d'entrenament o partit: càrrega = minuts × esforç percebut (sRPE, 1–10). */
+export interface Load {
+  id?: string
+  date: string // ISO
+  kind: 'entreno' | 'partit'
+  minutes: number
+  rpe: number
+}
+
 export interface Player {
   id: string
   name: string
@@ -34,6 +43,7 @@ export interface Player {
   measures: Measure[]
   wellness: Wellness[]
   injuries: Injury[]
+  loads: Load[]
 }
 
 export interface Team {
@@ -69,6 +79,24 @@ interface Spec {
   dip?: number // setmana en què el benestar baixa
   injuries?: Injury[]
   comment?: string
+  spike?: boolean // la darrera setmana ha entrenat molt més (dos equips, campus…)
+  stale?: boolean // fa mesos que no es mesura
+}
+
+/** Sis setmanes d'entrenaments (dl, dc, dj) i partit en dissabte fins a TODAY. */
+function buildLoads(spec: Spec, r: () => number): Load[] {
+  const out: Load[] = []
+  const end = new Date(TODAY + 'T12:00:00')
+  for (let back = 42; back >= 0; back--) {
+    const d = new Date(end); d.setDate(d.getDate() - back)
+    const dow = d.getDay()
+    const date = d.toISOString().slice(0, 10)
+    const recent = back < 7
+    if ([1, 3, 4].includes(dow)) out.push({ date, kind: 'entreno', minutes: 90, rpe: Math.round(4 + r() * 3) })
+    else if (dow === 6) out.push({ date, kind: 'partit', minutes: Math.round(20 + r() * 15), rpe: Math.round(6 + r() * 3) })
+    if (spec.spike && recent && [2, 5, 0].includes(dow)) out.push({ date, kind: dow === 0 ? 'partit' : 'entreno', minutes: dow === 0 ? 40 : 90, rpe: Math.round(6 + r() * 3) })
+  }
+  return out
 }
 
 function build(sex: Sex, spec: Spec, seed: number): Player {
@@ -78,7 +106,7 @@ function build(sex: Sex, spec: Spec, seed: number): Player {
   const spurt = sex === 'F' ? 30 : 36
   const k = sex === 'F' ? 1.05 : 0.95
   const heightAt = (age: number) => spec.adult - spurt + spurt / (1 + Math.exp(-k * (age - spec.phvAge))) - 6 * Math.exp(-(age - 9) / 3) * 0.2
-  const measures: Measure[] = MEASURE_DATES.map((d) => {
+  const measures: Measure[] = (spec.stale ? MEASURE_DATES.slice(0, 2) : MEASURE_DATES).map((d) => {
     const a = spec.age - (new Date(last).getTime() - new Date(d).getTime()) / (365.25 * 24 * 3600 * 1000)
     const h = Math.round((heightAt(a) + (r() - 0.5) * 0.6) * 10) / 10
     const sitRatio = sex === 'F' ? 0.515 + (a - 13) * 0.004 : 0.505 + (a - 13) * 0.005
@@ -108,6 +136,7 @@ function build(sex: Sex, spec: Spec, seed: number): Player {
     measures,
     wellness,
     injuries: spec.injuries ?? [],
+    loads: buildLoads(spec, r),
   }
 }
 
@@ -117,12 +146,12 @@ const cadetF: Spec[] = [
   { name: 'Noa Puig', age: 14.2, phvAge: 12.4, adult: 162, bmi: 20.5 },
   { name: 'Mariona Vidal', age: 13.9, phvAge: 12.3, adult: 172, bmi: 17.4 },
   { name: 'Aina Roca', age: 14.8, phvAge: 11.9, adult: 160, bmi: 22.1 },
-  { name: 'Clara Serra', age: 13.6, phvAge: 12.9, adult: 168, bmi: 18.6, dip: 6, comment: 'Molts exàmens aquesta setmana' },
+  { name: 'Clara Serra', age: 13.6, phvAge: 12.9, adult: 168, bmi: 18.6, dip: 6, spike: true, comment: 'Molts exàmens aquesta setmana' },
   { name: 'Ona Font', age: 14.4, phvAge: 12.1, adult: 165, bmi: 19.1, injuries: [{ date: '2026-09-12', zone: 'Turmell esquerre', note: 'Esquinç lleu en partit', status: 'tancada' }] },
   { name: 'Paula Martí', age: 14.0, phvAge: 12.7, adult: 175, bmi: 18.0 },
   { name: 'Emma Costa', age: 13.2, phvAge: 12.6, adult: 164, bmi: 18.9, pain: { from: 6, zone: 'Taló', levels: [2, 3], side: 'Esquerre' } },
   { name: 'Berta Pons', age: 14.5, phvAge: 11.8, adult: 158, bmi: 21.4 },
-  { name: 'Txell Riera', age: 14.1, phvAge: 12.2, adult: 167, bmi: 19.5 },
+  { name: 'Txell Riera', age: 14.1, phvAge: 12.2, adult: 167, bmi: 19.5, stale: true },
   { name: 'Irene Mas', age: 13.7, phvAge: 12.0, adult: 163, bmi: 20.0 },
 ]
 
@@ -132,7 +161,7 @@ const infantilF: Spec[] = [
   { name: 'Martina Bosch', age: 11.2, phvAge: 12.4, adult: 169, bmi: 16.9 },
   { name: 'Carla Pujol', age: 12.1, phvAge: 11.9, adult: 164, bmi: 17.8, pain: { from: 4, zone: 'Genoll', levels: [2, 3, 3, 4], side: 'Esquerre' } },
   { name: 'Nora Valls', age: 13.3, phvAge: 11.4, adult: 160, bmi: 19.2 },
-  { name: 'Gemma Prat', age: 11.6, phvAge: 12.6, adult: 171, bmi: 17.1 },
+  { name: 'Gemma Prat', age: 11.6, phvAge: 12.6, adult: 171, bmi: 17.1, stale: true },
   { name: 'Joana Bru', age: 11.5, phvAge: 11.7, adult: 165, bmi: 17.5 },
   { name: 'Sira Comas', age: 13.1, phvAge: 11.5, adult: 159, bmi: 19.6, dip: 5 },
   { name: 'Elna Rius', age: 11.3, phvAge: 12.9, adult: 173, bmi: 16.5 },
@@ -142,7 +171,7 @@ const infantilF: Spec[] = [
 const infantilM: Spec[] = [
   { name: 'Pol Grau', age: 13.6, phvAge: 13.7, adult: 182, bmi: 18.3, pain: { from: 5, zone: 'Genoll', levels: [3, 4, 4], side: 'Dret', stopped: true } },
   { name: 'Marc Oliva', age: 13.2, phvAge: 14.3, adult: 178, bmi: 17.6 },
-  { name: 'Biel Torres', age: 13.9, phvAge: 13.2, adult: 185, bmi: 18.8 },
+  { name: 'Biel Torres', age: 13.9, phvAge: 13.2, adult: 185, bmi: 18.8, spike: true },
   { name: 'Nil Sabaté', age: 13.4, phvAge: 13.9, adult: 176, bmi: 19.4 },
   { name: 'Arnau Vila', age: 13.7, phvAge: 12.9, adult: 180, bmi: 18.0 },
   { name: 'Èric Serrat', age: 13.1, phvAge: 14.6, adult: 174, bmi: 17.2 },

@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { WEEKS, type Injury, type Player, type Team } from '@/lib/data'
-import { derive, deriveTeam, firstName, fmt, mondaySummary, signed, wellnessScore, type Level, type PlayerView } from '@/lib/derive'
+import { WEEKS, type Injury, type Load, type Player, type Team } from '@/lib/data'
+import { derive, deriveTeam, firstName, fmt, mondaySummary, phaseNow, signed, wellnessScore, type Level, type PlayerView } from '@/lib/derive'
 import { DICT, zone, type Dict } from '@/lib/i18n'
 import { ageAt, growthVelocity, maturityOffset, phaseOf, RECOS, type Lang, type Measure } from '@/lib/phv'
-import { answerOf, conclusions, DIMS, surveyWeeks } from '@/lib/survey'
+import { answerOf, conclusions, DIMS, mondayLabel, surveyWeeks } from '@/lib/survey'
+import { loadAlert, loadView, weeklyLabels, weeklyLoads } from '@/lib/load'
 import { InstallButton } from '@/components/Install'
-import { GrowthChart, MaturityMap, OffsetGauge, Sparkline, WellnessChart } from '@/components/Charts'
+import { GrowthChart, MaturityMap, OffsetGauge, Sparkline, WeekBars, WellnessChart } from '@/components/Charts'
 
-type Tab = 'team' | 'player' | 'measure' | 'survey' | 'family' | 'club' | 'manage'
+type Tab = 'team' | 'player' | 'measure' | 'survey' | 'load' | 'family' | 'club' | 'manage'
 
 export function Chip({ level, children }: { level: Level; children: React.ReactNode }) {
   return <span className={`chip lv-${level}`}><span className="dot" />{children}</span>
@@ -29,6 +30,7 @@ export interface Actions {
   setInjuryStatus: (id: string, status: Injury['status']) => Promise<void>
   newSurveyLink: (teamId: string) => Promise<void>
   deleteMeasure: (playerId: string, date: string) => Promise<void>
+  saveLoads: (rows: { playerId: string; load: Load }[]) => Promise<void>
 }
 
 export interface WorkspaceProps {
@@ -43,12 +45,7 @@ export interface WorkspaceProps {
 }
 
 export const todayISO = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10) }
-/** Dilluns de la setmana d'una data ISO, com a etiqueta d/m. */
-/** Setmana del qüestionari (el seu dilluns). Es respon en diumenge, així que de dilluns a dissabte encara es mira la setmana anterior. */
-export function mondayLabel(iso: string) {
-  const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() - 6); d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
-  return `${d.getDate()}/${d.getMonth() + 1}`
-}
+export { mondayLabel }
 
 export function useLang() {
   const [lang, setLang] = useState<Lang>(() => { try { return (localStorage.getItem('lang') as Lang) || 'ca' } catch { return 'ca' } })
@@ -92,7 +89,7 @@ export default function Workspace({ demo, teams: initial, club, today, actions, 
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(null), 2600); return () => clearTimeout(id) }, [toast])
 
   const team = teams.find((x) => x.id === teamId) ?? teams[0]
-  const views = useMemo(() => (team ? deriveTeam(team, lang) : []), [team, lang])
+  const views = useMemo(() => (team ? deriveTeam(team, lang, today) : []), [team, lang, today])
   const player = team?.players.find((p) => p.id === playerId) ?? team?.players[0]
 
   const updatePlayer = (id: string, fn: (p: Player) => Player) =>
@@ -105,7 +102,7 @@ export default function Workspace({ demo, teams: initial, club, today, actions, 
   const openMeasure = (id: string) => { setPlayerId(id); setTab('measure'); window.scrollTo({ top: 0 }) }
   const pickTeam = (id: string) => { setTeamId(id); setPlayerId(teams.find((x) => x.id === id)?.players[0]?.id ?? '') }
 
-  const tabs: [Tab, string][] = [['team', t.nav_team], ['player', t.nav_player], ['measure', t.nav_measure], ['survey', t.nav_survey], ['family', t.nav_family], ['club', t.nav_club]]
+  const tabs: [Tab, string][] = [['team', t.nav_team], ['player', t.nav_player], ['measure', t.nav_measure], ['survey', t.nav_survey], ['load', t.nav_load], ['family', t.nav_family], ['club', t.nav_club]]
   if (manage) tabs.push(['manage', t.nav_manage])
   const needsPlayers = tab !== 'manage' && tab !== 'club' && tab !== 'team'
 
@@ -148,10 +145,15 @@ export default function Workspace({ demo, teams: initial, club, today, actions, 
                 if (demo) setToast(t.saved); else run(() => actions!.saveMeasure(id, m), t.saved)
               }} />}
             {tab === 'survey' && (demo
-              ? <SurveyView t={t} lang={lang} team={team} onSend={(id, w) => updatePlayer(id, (p) => ({ ...p, wellness: [...p.wellness.slice(0, -1), w] }))} openPlayer={openPlayer} />
+              ? <SurveyView t={t} lang={lang} today={today} team={team} onSend={(id, w) => updatePlayer(id, (p) => ({ ...p, wellness: [...p.wellness.slice(0, -1), w] }))} openPlayer={openPlayer} />
               : <SurveyShare t={t} lang={lang} today={today} team={team} openPlayer={openPlayer} toast={setToast} onNewLink={() => run(() => actions!.newSurveyLink(team.id))} />)}
-            {tab === 'family' && player && <FamilyView t={t} lang={lang} club={club} team={team} player={player} setPlayerId={setPlayerId} goMeasure={() => openMeasure(player.id)} />}
-            {tab === 'club' && <ClubView t={t} lang={lang} club={club} teams={teams} openTeam={(id) => { pickTeam(id); setTab('team') }} />}
+            {tab === 'load' && <LoadScreen t={t} lang={lang} demo={demo} today={today} team={team} openPlayer={openPlayer} toast={setToast}
+              onSave={(rows) => {
+                for (const r of rows) updatePlayer(r.playerId, (p) => ({ ...p, loads: [...p.loads.filter((l) => l.date !== r.load.date || l.kind !== r.load.kind), r.load] }))
+                if (demo) setToast(t.load_saved); else run(() => actions!.saveLoads(rows), t.load_saved)
+              }} />}
+            {tab === 'family' && player && <FamilyView t={t} lang={lang} today={today} club={club} team={team} player={player} setPlayerId={setPlayerId} goMeasure={() => openMeasure(player.id)} />}
+            {tab === 'club' && <ClubView t={t} lang={lang} today={today} club={club} teams={teams} openTeam={(id) => { pickTeam(id); setTab('team') }} />}
           </>}
       </main>
 
@@ -186,6 +188,7 @@ function TeamView({ t, lang, demo, today, teams, team, views, pickTeam, openPlay
   const answered = demo ? views.length - 1 : team.players.filter((p) => p.wellness.at(-1)?.week === thisWeek).length
   const total = demo ? views.length : team.players.length
   const unmeasured = team.players.filter((p) => !p.measures.length)
+  const due = [...unmeasured.map((p) => ({ p, days: null as number | null })), ...views.filter((v) => v.measureDue).sort((a, b) => b.measureDays - a.measureDays).map((v) => ({ p: v.p, days: v.measureDays as number | null }))]
   const peak = views.filter((v) => v.phase.key === 'plena').length
   const red = views.filter((v) => v.level === 'bad').length
   const sorted = [...views].sort((a, b) => ({ bad: 0, warn: 1, ok: 2 }[a.level] - { bad: 0, warn: 1, ok: 2 }[b.level]) || a.offset - b.offset)
@@ -212,7 +215,7 @@ function TeamView({ t, lang, demo, today, teams, team, views, pickTeam, openPlay
           <ul className="grid gap-2.5">
             {summary.map((s, i) => (
               <li key={i} className="flex gap-3 items-start">
-                <span className="mt-[7px] w-2 h-2 rounded-full flex-none" style={{ background: s.level === 'bad' ? 'var(--bad)' : s.level === 'warn' ? 'var(--warn)' : 'var(--ok)' }} />
+                <span className="mt-[7px] w-2 h-2 rounded-full flex-none" style={{ background: s.level === 'bad' ? 'var(--bad)' : s.level === 'warn' ? 'var(--warn)' : s.level === 'info' ? 'var(--accent)' : 'var(--ok)' }} />
                 <span className="text-[15px]">{s.text}</span>
               </li>
             ))}
@@ -231,6 +234,19 @@ function TeamView({ t, lang, demo, today, teams, team, views, pickTeam, openPlay
               <div className="h-full rounded-full" style={{ width: `${total ? (answered / total) * 100 : 0}%`, background: 'var(--accent)' }} />
             </div>
           </div>
+          {due.length > 0 && (
+            <div className="card p-4 col-span-3 grid gap-2">
+              <div className="grid gap-0.5"><h3 className="font-display text-[16px] font-bold">{t.measure_due_title}</h3><p className="text-[12.5px] muted">{t.measure_due_sub}</p></div>
+              <ul className="grid gap-1">
+                {due.map(({ p, days }) => (
+                  <li key={p.id}><button className="w-full flex justify-between gap-3 text-left text-[14px]" onClick={() => openMeasure(p.id)}>
+                    <span className="font-medium">{p.name}</span>
+                    <span className="font-mono text-[12.5px] tx-warn">{days === null ? t.not_measured : t.weeks_ago.replace('{n}', String(Math.floor(days / 7)))} →</span>
+                  </button></li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       </div>
 
@@ -263,7 +279,7 @@ function TeamView({ t, lang, demo, today, teams, team, views, pickTeam, openPlay
                   <td className="num font-mono text-[13px]">{v.velocity === null ? '—' : <span className={v.velocity >= 7.5 ? 'tx-warn font-medium' : ''}>{fmt(v.velocity)}</span>}</td>
                   <td>{v.wellnessSeries.length >= 2 ? <Sparkline values={v.wellnessSeries} painWeeks={v.p.wellness.map((w) => !!w.pain)} /> : <span className="faint">—</span>}</td>
                   <td className="text-[13px] max-w-[260px]">
-                    {v.alerts.filter((a) => a.level !== 'info' && !a.text.startsWith(v.phase.label[lang])).slice(0, 2).map((a, i) => (
+                    {v.alerts.filter((a) => a.level !== 'info' && !a.text.startsWith(v.phase.label[lang])).sort((a, b) => (b.level === 'bad' ? 1 : 0) - (a.level === 'bad' ? 1 : 0)).slice(0, 2).map((a, i) => (
                       <div key={i} className={`tx-${a.level === 'bad' ? 'bad' : 'warn'}`}>{a.text}</div>
                     ))}
                     {v.alerts.filter((a) => a.level !== 'info' && !a.text.startsWith(v.phase.label[lang])).length === 0 && <span className="faint">—</span>}
@@ -303,7 +319,7 @@ function PlayerSelect({ t, team, player, setPlayerId }: { t: Dict; team: Team; p
 }
 
 function PlayerScreen({ t, lang, today, team, player, setPlayerId, goFamily, goMeasure, onAddInjury, onInjuryStatus, onDeleteMeasure }: { t: Dict; lang: Lang; today: string; team: Team; player: Player; setPlayerId: (id: string) => void; goFamily: () => void; goMeasure: () => void; onAddInjury: (i: Injury) => void; onInjuryStatus: (i: Injury, s: Injury['status']) => void; onDeleteMeasure: (date: string) => void }) {
-  const v = derive(player, lang)
+  const v = derive(player, lang, today)
   if (!v) return (
     <div className="grid gap-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -532,7 +548,7 @@ const fmtIn = (n: number) => (Math.round(n * 10) / 10).toString()
 
 const FACES = ['😫', '🙁', '😐', '🙂', '😄']
 
-function SurveyView({ t, lang, team, onSend, openPlayer }: { t: Dict; lang: Lang; team: Team; onSend: (id: string, w: Player['wellness'][number]) => void; openPlayer: (id: string) => void }) {
+function SurveyView({ t, lang, today, team, onSend, openPlayer }: { t: Dict; lang: Lang; today: string; team: Team; onSend: (id: string, w: Player['wellness'][number]) => void; openPlayer: (id: string) => void }) {
   const [who, setWho] = useState(team.players[1].id)
   const [pain, setPain] = useState(true)
   const [zoneV, setZone] = useState('Genoll')
@@ -543,7 +559,7 @@ function SurveyView({ t, lang, team, onSend, openPlayer }: { t: Dict; lang: Lang
   const [comment, setComment] = useState('')
   const [sent, setSent] = useState(false)
   const p = team.players.find((x) => x.id === who)!
-  const v = derive(p, lang)!
+  const v = derive(p, lang, today)!
   const zones = ZONES
   const dims: [keyof typeof scores, string][] = [['energy', t.energy], ['sleep', t.sleep], ['legs', t.legs], ['stress', t.stress], ['mood', t.mood]]
   const submit = (e: React.FormEvent) => {
@@ -633,6 +649,7 @@ function SurveyShare({ t, lang, today, team, openPlayer, toast, onNewLink }: { t
   const dimLabel = { energy: t.energy, sleep: t.sleep, legs: t.legs, stress: t.stress, mood: t.mood }
   const cell = (n: number) => (n <= 2 ? 'lv-bad' : n === 3 ? 'lv-warn' : '')
   const copy = async () => { try { await navigator.clipboard.writeText(link); toast(t.copied) } catch { toast(link) } }
+  const reminder = `${t.remind_msg.replace('{names}', missing.map((p) => firstName(p.name)).join(', '))} ${link}`
   return (
     <div className="grid gap-6">
       <div className="grid gap-1">
@@ -660,6 +677,12 @@ function SurveyShare({ t, lang, today, team, openPlayer, toast, onNewLink }: { t
         <section className="card p-5 grid gap-3 content-start">
           <h2 className="font-display text-[18px] font-bold">{t.not_answered}</h2>
           <ul className="grid gap-1.5">{missing.map((p) => <li key={p.id} className="muted">{p.name}</li>)}{missing.length === 0 && <li className="tx-ok">✓</li>}</ul>
+          {missing.length > 0 && week === current && (
+            <div className="flex flex-wrap gap-2 pt-1">
+              <a className="btn" href={`https://wa.me/?text=${encodeURIComponent(reminder)}`} target="_blank" rel="noreferrer">{t.remind_btn}</a>
+              <button className="btn-ghost" onClick={async () => { try { await navigator.clipboard.writeText(reminder); toast(t.copied) } catch { toast(reminder) } }}>{t.remind_copy}</button>
+            </div>
+          )}
         </section>
       </div>
       <section className="card p-5 grid gap-4">
@@ -700,10 +723,118 @@ function SurveyShare({ t, lang, today, team, openPlayer, toast, onNewLink }: { t
   )
 }
 
+/* ───────────── Càrrega ───────────── */
+
+const sev = (l?: 'warn' | 'bad') => (l === 'bad' ? 0 : l === 'warn' ? 1 : 2)
+
+function LoadScreen({ t, lang, demo, today, team, openPlayer, toast, onSave }: { t: Dict; lang: Lang; demo: boolean; today: string; team: Team & { survey_token?: string }; openPlayer: (id: string) => void; toast: (s: string) => void; onSave: (rows: { playerId: string; load: Load }[]) => void }) {
+  const link = `${location.origin}/e/${team.survey_token ?? 'demo'}/esforc`
+  const rows = useMemo(() => team.players.map((p) => {
+    const ph = phaseNow(p)
+    const lv = loadView(p.loads, today)
+    return { p, ph, lv, alert: ph ? loadAlert(lv, ph.key, lang) : null, weeks: weeklyLoads(p.loads, today) }
+  }).sort((a, b) => sev(a.alert?.level) - sev(b.alert?.level) || (b.lv.ratio ?? 0) - (a.lv.ratio ?? 0)), [team, today, lang])
+  const teamWeeks = rows.reduce((acc, r) => acc.map((v, i) => v + r.weeks[i]), Array(6).fill(0) as number[])
+  const any = rows.some((r) => r.p.loads.length)
+  const copy = async () => { try { await navigator.clipboard.writeText(link); toast(t.copied) } catch { toast(link) } }
+
+  const [date, setDate] = useState(today)
+  const [kind, setKind] = useState<Load['kind']>('entreno')
+  const [minutes, setMinutes] = useState('90')
+  const [rpe, setRpe] = useState<Record<string, string>>({})
+  const [mins, setMins] = useState<Record<string, string>>({})
+  useEffect(() => {
+    const r: Record<string, string> = {}, m: Record<string, string> = {}
+    for (const p of team.players) {
+      const l = p.loads.find((x) => x.date === date && x.kind === kind)
+      if (l) { r[p.id] = String(l.rpe); m[p.id] = String(l.minutes) }
+    }
+    setRpe(r); setMins(m)
+  }, [date, kind, team])
+  const baseMin = parseInt(minutes, 10)
+  const toSave = team.players.filter((p) => rpe[p.id]).map((p) => {
+    const own = parseInt(mins[p.id] ?? '', 10)
+    return { playerId: p.id, load: { date, kind, minutes: Number.isFinite(own) && own > 0 ? own : baseMin, rpe: +rpe[p.id] } }
+  })
+  const valid = toSave.length > 0 && baseMin > 0 && baseMin <= 300 && date <= today && toSave.every((r) => r.load.minutes > 0 && r.load.minutes <= 300)
+
+  return (
+    <div className="grid gap-6">
+      <div className="grid gap-1">
+        <div className="label">{team.name}</div>
+        <h1 className="font-display text-[34px] md:text-[40px] font-bold leading-none">{t.load_title}</h1>
+        <p className="muted">{t.load_sub}</p>
+      </div>
+
+      {!demo && (
+        <section className="card p-5 grid gap-4">
+          <div className="grid gap-1"><h2 className="font-display text-[20px] font-bold">{t.load_share_title}</h2><p className="muted text-[14px]">{t.load_share_sub}</p></div>
+          <div className="font-mono text-[13px] p-3 rounded-lg break-all" style={{ background: 'var(--surface-2)' }}>{link}</div>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn" onClick={copy}>{t.copy}</button>
+            <a className="btn-ghost" href={`https://wa.me/?text=${encodeURIComponent(`${t.load_whatsapp_msg} ${link}`)}`} target="_blank" rel="noreferrer">{t.share_whatsapp}</a>
+          </div>
+        </section>
+      )}
+
+      {any ? <>
+        <section className="card p-5 grid gap-2">
+          <div className="flex flex-wrap items-baseline justify-between gap-2"><h2 className="font-display text-[20px] font-bold">{t.load_team_week}</h2><span className="text-[12.5px] muted">{t.load_unit}</span></div>
+          <WeekBars big values={teamWeeks} level="ok" labels={weeklyLabels(today)} unit={t.load_unit} />
+        </section>
+        <section className="card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="grid-t min-w-[760px]">
+              <thead><tr>{[t.col_player, t.col_phase, t.col_sessions, t.col_week_load, t.col_avg_load, t.col_ratio, t.col_last_rpe, t.col_trend].map((h) => <th key={h} className="label">{h}</th>)}</tr></thead>
+              <tbody>
+                {rows.map(({ p, ph, lv, alert, weeks }) => (
+                  <tr key={p.id} onClick={() => openPlayer(p.id)} title={alert?.text}>
+                    <td className="font-medium">{p.name}</td>
+                    <td>{ph ? <Chip level={ph.level}>{ph.label[lang]}</Chip> : <span className="faint">—</span>}</td>
+                    <td className="num font-mono text-[13px]">{lv.sessions}</td>
+                    <td className="num font-mono text-[13px] font-medium">{Math.round(lv.week)}</td>
+                    <td className="num font-mono text-[13px]">{lv.avg === null ? '—' : Math.round(lv.avg)}</td>
+                    <td>{lv.ratio === null ? <span className="faint">—</span> : <Chip level={alert?.level ?? 'ok'}>×{fmt(lv.ratio)}</Chip>}</td>
+                    <td className="num font-mono text-[13px]">{lv.lastRpe === null ? '—' : `${lv.lastRpe}/10`}</td>
+                    <td><WeekBars values={weeks} level={alert?.level ?? 'ok'} unit={t.load_unit} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="p-5 pt-3 text-[12.5px] muted">{t.load_help}</p>
+        </section>
+      </> : <p className="card p-6 muted">{t.load_none}</p>}
+
+      <section className="card p-5 grid gap-4">
+        <div className="grid gap-1"><h2 className="font-display text-[20px] font-bold">{t.load_add_title}</h2><p className="muted text-[14px]">{t.load_add_sub}</p></div>
+        <div className="grid gap-3 sm:grid-cols-[200px_auto_120px] items-end">
+          <label className="field"><span className="text-[13px] font-medium">{t.measure_date}</span><input type="date" value={date} max={today} onChange={(e) => setDate(e.target.value)} /></label>
+          <div className="flex gap-2">{(['entreno', 'partit'] as const).map((k) => <button type="button" key={k} className="pill" aria-pressed={kind === k} onClick={() => { setKind(k); setMinutes(k === 'partit' ? '40' : '90') }}>{k === 'partit' ? t.kind_partit : t.kind_entreno}</button>)}</div>
+          <label className="field"><span className="text-[13px] font-medium">{t.minutes}</span><input inputMode="numeric" value={minutes} onChange={(e) => setMinutes(e.target.value.replace(/\D/g, ''))} /></label>
+        </div>
+        <ul className="grid gap-2 sm:grid-cols-2">
+          {team.players.map((p) => (
+            <li key={p.id} className="flex items-center gap-2">
+              <span className="flex-1 text-[14px] font-medium truncate">{p.name}</span>
+              <select aria-label={`${t.rpe} ${p.name}`} className="text-[14px] rounded-lg px-2 py-1.5 border" style={{ borderColor: 'var(--line)', background: 'var(--surface)' }} value={rpe[p.id] ?? ''} onChange={(e) => setRpe({ ...rpe, [p.id]: e.target.value })}>
+                <option value="">{t.absent}</option>
+                {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n} · {t.rpe_labels[n]}</option>)}
+              </select>
+              <input aria-label={`${t.minutes} ${p.name}`} inputMode="numeric" className="w-[64px] text-[14px] rounded-lg px-2 py-1.5 border" style={{ borderColor: 'var(--line)', background: 'var(--surface)' }} placeholder={minutes} value={mins[p.id] ?? ''} onChange={(e) => setMins({ ...mins, [p.id]: e.target.value.replace(/\D/g, '') })} />
+            </li>
+          ))}
+        </ul>
+        <button className="btn justify-self-start" disabled={!valid} style={!valid ? { opacity: 0.5 } : undefined} onClick={() => onSave(toSave)}>{t.save_btn}</button>
+      </section>
+    </div>
+  )
+}
+
 /* ───────────── Famílies ───────────── */
 
-function FamilyView({ t, lang, club, team, player, setPlayerId, goMeasure }: { t: Dict; lang: Lang; club: { name: string }; team: Team; player: Player; setPlayerId: (id: string) => void; goMeasure: () => void }) {
-  const v = derive(player, lang)
+function FamilyView({ t, lang, today, club, team, player, setPlayerId, goMeasure }: { t: Dict; lang: Lang; today: string; club: { name: string }; team: Team; player: Player; setPlayerId: (id: string) => void; goMeasure: () => void }) {
+  const v = derive(player, lang, today)
   if (!v) return (
     <div className="grid gap-6">
       <div className="flex flex-wrap items-end justify-between gap-4"><h1 className="font-display text-[34px] md:text-[40px] font-bold leading-none">{t.family_title}</h1><PlayerSelect t={t} team={team} player={player} setPlayerId={setPlayerId} /></div>
@@ -756,8 +887,8 @@ function FamilyView({ t, lang, club, team, player, setPlayerId, goMeasure }: { t
 
 /* ───────────── Club ───────────── */
 
-function ClubView({ t, lang, club, teams, openTeam }: { t: Dict; lang: Lang; club: { name: string; town: string }; teams: Team[]; openTeam: (id: string) => void }) {
-  const all = teams.map((tm) => ({ tm, vs: deriveTeam(tm, lang) }))
+function ClubView({ t, lang, today, club, teams, openTeam }: { t: Dict; lang: Lang; today: string; club: { name: string; town: string }; teams: Team[]; openTeam: (id: string) => void }) {
+  const all = teams.map((tm) => ({ tm, vs: deriveTeam(tm, lang, today) }))
   return (
     <div className="grid gap-6">
       <div className="grid gap-1">
